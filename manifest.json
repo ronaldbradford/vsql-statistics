@@ -1,0 +1,7 @@
+{
+  "name": "vsql_statistics",
+  "version": "1.0.0",
+  "description": "Statistical aggregate functions for data scientists — IQR, quartiles, and outlier detection",
+  "author": "Ronald Bradford",
+  "license": "GPL-2.0"
+}
