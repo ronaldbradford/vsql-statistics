@@ -33,6 +33,7 @@ Commit the updated `.result` file alongside the `.test` file.
 | Test file | What it covers |
 |---|---|
 | `stats_iqr.test` | All six IQR functions; INT CAST workaround; single-row, two-row, and all-NULL edge cases; GROUP BY |
+| `stats_ttest.test` | All seven t-test functions; reversed-group symmetry; INT CAST workaround; one-group, small-group, and all-NULL edge cases; custom alpha |
 
 ## Manual Spot-Check
 
@@ -51,5 +52,17 @@ FROM espresso_sales;
 -- Expected: -2.25, 27.75
 
 DROP TABLE espresso_sales;
+
+-- t-test: two groups of 5 observations each, hand-verifiable (t=1.0, df=8)
+CREATE TABLE ttest_data (value DOUBLE, grp INT);
+INSERT INTO ttest_data VALUES
+  (100,1),(110,1),(120,1),(130,1),(140,1),
+  (90,2),(100,2),(110,2),(120,2),(130,2);
+
+SELECT STATS_TTEST_T(value, grp)          AS t_stat     FROM ttest_data;  -- 1.0
+SELECT STATS_TTEST_DF(value, grp)         AS df         FROM ttest_data;  -- 8.0
+SELECT STATS_TTEST_P_TWO_TAIL(value, grp) AS p_two_tail FROM ttest_data;  -- 0.3466
+
+DROP TABLE ttest_data;
 UNINSTALL EXTENSION vsql_statistics;
 ```

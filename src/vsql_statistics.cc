@@ -18,10 +18,15 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <vector>
 
 using vsql::RealArg;
 using vsql::RealResult;
+
+// =============================================================================
+// IQR family
+// =============================================================================
 
 struct StatsState {
   std::vector<double> values;
@@ -45,8 +50,9 @@ static double range_median(const std::vector<double> &v, size_t lo, size_t hi) {
 
 // Sorts values and computes Q1, Q3 using Tukey's hinges (exclusive median).
 // Returns false if the group is empty (all-NULL input).
-static bool compute_quartiles(std::vector<double> vals, double &q1, double &q3) {
-  if (vals.empty()) return false;
+static bool compute_quartiles(const std::vector<double> &vals_in, double &q1, double &q3) {
+  if (vals_in.empty()) return false;
+  std::vector<double> vals(vals_in);
   std::sort(vals.begin(), vals.end());
   size_t n = vals.size();
   if (n == 1) {
@@ -107,6 +113,206 @@ static constexpr auto make_stats_func(const char *name) {
     .build();
 }
 
+// =============================================================================
+// Two-sample t-test assuming equal variances (pooled-variance t-test)
+// =============================================================================
+
+struct TTestState {
+  std::vector<double> group1;
+  std::vector<double> group2;
+  double alpha{0.05};
+};
+
+static void ttest_clear(TTestState &s) {
+  s = TTestState{};
+}
+
+// Accumulate for 2-parameter functions (value, group).
+// group == 1.0 → group1, group == 2.0 → group2; other values are ignored.
+static void ttest_accumulate(TTestState &s, RealArg value, RealArg group) {
+  if (value.is_null() || group.is_null()) return;
+  double g = group.value();
+  if (g == 1.0)      s.group1.push_back(value.value());
+  else if (g == 2.0) s.group2.push_back(value.value());
+}
+
+// Accumulate for 3-parameter functions (value, group, alpha).
+static void ttest_crit_accumulate(TTestState &s, RealArg value, RealArg group,
+                                   RealArg alpha) {
+  ttest_accumulate(s, value, group);
+  if (!alpha.is_null()) s.alpha = alpha.value();
+}
+
+// Continued fraction core for the regularized incomplete beta function.
+// Uses Lentz's algorithm. Precondition: x < (a+1)/(a+b+2).
+static double betacf(double x, double a, double b) {
+  const int    MAX_ITER = 500;
+  const double TINY     = 1e-30;
+  const double EPS      = 1e-12;
+
+  double qab = a + b, qap = a + 1.0, qam = a - 1.0;
+  double c = 1.0;
+  double d = 1.0 - qab * x / qap;
+  if (std::fabs(d) < TINY) d = TINY;
+  d = 1.0 / d;
+  double h = d;
+
+  for (int m = 1; m <= MAX_ITER; m++) {
+    int m2 = 2 * m;
+    // Even step
+    double aa = (double)m * (b - (double)m) * x
+                / ((qam + m2) * (a + m2));
+    d = 1.0 + aa * d; if (std::fabs(d) < TINY) d = TINY; d = 1.0 / d;
+    c = 1.0 + aa / c; if (std::fabs(c) < TINY) c = TINY;
+    h *= d * c;
+    // Odd step
+    aa = -(a + (double)m) * (qab + (double)m) * x
+         / ((a + m2) * (qap + m2));
+    d = 1.0 + aa * d; if (std::fabs(d) < TINY) d = TINY; d = 1.0 / d;
+    c = 1.0 + aa / c; if (std::fabs(c) < TINY) c = TINY;
+    double del = d * c;
+    h *= del;
+    if (std::fabs(del - 1.0) < EPS) break;
+  }
+  return h;
+}
+
+// Regularized incomplete beta function I_x(a, b).
+static double betai(double x, double a, double b) {
+  if (x <= 0.0) return 0.0;
+  if (x >= 1.0) return 1.0;
+  // Use symmetry I_x(a,b) = 1 - I_{1-x}(b,a) when x is large for convergence.
+  if (x > (a + 1.0) / (a + b + 2.0)) return 1.0 - betai(1.0 - x, b, a);
+  double lbeta_ab = std::lgamma(a) + std::lgamma(b) - std::lgamma(a + b);
+  double front = std::exp(a * std::log(x) + b * std::log(1.0 - x) - lbeta_ab) / a;
+  return front * betacf(x, a, b);
+}
+
+// Two-tail p-value: P(|T_df| > |t|) using the incomplete beta function.
+static double t_two_tail_p(double t, double df) {
+  double x = df / (df + t * t);
+  return betai(x, df / 2.0, 0.5);
+}
+
+// One-tail critical value: largest t > 0 such that P(T_df > t) >= alpha.
+// Uses bisection on t_two_tail_p; 200 iterations gives ~12 significant figures.
+static double t_critical(double alpha, double df) {
+  double lo = 0.0, hi = 1000.0;
+  for (int i = 0; i < 200; i++) {
+    double mid = (lo + hi) / 2.0;
+    if (t_two_tail_p(mid, df) / 2.0 > alpha) lo = mid;
+    else                                       hi = mid;
+  }
+  return (lo + hi) / 2.0;
+}
+
+// Pooled-variance t-test statistics computed once and shared by all result fns.
+struct TTestResult {
+  double t_stat;
+  double df;
+  double pooled_var;
+};
+
+// Returns false if either group has fewer than 2 observations (df ≤ 0)
+// or if pooled variance is zero and means differ (t would be ±inf).
+static bool compute_ttest(const TTestState &s, TTestResult &r) {
+  size_t n1 = s.group1.size(), n2 = s.group2.size();
+  if (n1 < 2 || n2 < 2) return false;
+
+  double sum1 = 0.0, sum2 = 0.0;
+  for (double v : s.group1) sum1 += v;
+  for (double v : s.group2) sum2 += v;
+  double mean1 = sum1 / (double)n1, mean2 = sum2 / (double)n2;
+
+  double ssq1 = 0.0, ssq2 = 0.0;
+  for (double v : s.group1) ssq1 += (v - mean1) * (v - mean1);
+  for (double v : s.group2) ssq2 += (v - mean2) * (v - mean2);
+
+  double df         = (double)(n1 + n2 - 2);
+  double pooled_var = (ssq1 + ssq2) / df;
+
+  if (pooled_var == 0.0) {
+    // Both groups have zero variance; t is 0 iff means are equal, else undefined.
+    if (mean1 == mean2) { r = {0.0, df, 0.0}; return true; }
+    return false;
+  }
+
+  double t = (mean1 - mean2) / std::sqrt(pooled_var * (1.0 / (double)n1
+                                                      + 1.0 / (double)n2));
+  r = {t, df, pooled_var};
+  return true;
+}
+
+static void ttest_t_result(const TTestState &s, RealResult out) try {
+  TTestResult r;
+  if (!compute_ttest(s, r)) { out.set_null(); return; }
+  out.set(r.t_stat);
+} catch (...) { out.error("STATS_TTEST_T: unexpected error"); }
+
+static void ttest_df_result(const TTestState &s, RealResult out) try {
+  TTestResult r;
+  if (!compute_ttest(s, r)) { out.set_null(); return; }
+  out.set(r.df);
+} catch (...) { out.error("STATS_TTEST_DF: unexpected error"); }
+
+static void ttest_pooled_var_result(const TTestState &s, RealResult out) try {
+  TTestResult r;
+  if (!compute_ttest(s, r)) { out.set_null(); return; }
+  out.set(r.pooled_var);
+} catch (...) { out.error("STATS_TTEST_POOLED_VAR: unexpected error"); }
+
+static void ttest_p_one_tail_result(const TTestState &s, RealResult out) try {
+  TTestResult r;
+  if (!compute_ttest(s, r)) { out.set_null(); return; }
+  out.set(t_two_tail_p(r.t_stat, r.df) / 2.0);
+} catch (...) { out.error("STATS_TTEST_P_ONE_TAIL: unexpected error"); }
+
+static void ttest_p_two_tail_result(const TTestState &s, RealResult out) try {
+  TTestResult r;
+  if (!compute_ttest(s, r)) { out.set_null(); return; }
+  out.set(t_two_tail_p(r.t_stat, r.df));
+} catch (...) { out.error("STATS_TTEST_P_TWO_TAIL: unexpected error"); }
+
+static void ttest_t_crit_one_tail_result(const TTestState &s, RealResult out) try {
+  TTestResult r;
+  if (!compute_ttest(s, r)) { out.set_null(); return; }
+  out.set(t_critical(s.alpha, r.df));
+} catch (...) { out.error("STATS_TTEST_T_CRIT_ONE_TAIL: unexpected error"); }
+
+// Two-tail critical value splits alpha across both tails.
+static void ttest_t_crit_two_tail_result(const TTestState &s, RealResult out) try {
+  TTestResult r;
+  if (!compute_ttest(s, r)) { out.set_null(); return; }
+  out.set(t_critical(s.alpha / 2.0, r.df));
+} catch (...) { out.error("STATS_TTEST_T_CRIT_TWO_TAIL: unexpected error"); }
+
+template<auto ResultFn>
+static constexpr auto make_ttest_func(const char *name) {
+  return vsql::make_aggregate_func<TTestState, ResultFn>(name)
+    .returns(vsql::REAL)
+    .param(vsql::REAL)
+    .param(vsql::REAL)
+    .template clear<&ttest_clear>()
+    .template accumulate<&ttest_accumulate>()
+    .build();
+}
+
+template<auto ResultFn>
+static constexpr auto make_ttest_crit_func(const char *name) {
+  return vsql::make_aggregate_func<TTestState, ResultFn>(name)
+    .returns(vsql::REAL)
+    .param(vsql::REAL)
+    .param(vsql::REAL)
+    .param(vsql::REAL)
+    .template clear<&ttest_clear>()
+    .template accumulate<&ttest_crit_accumulate>()
+    .build();
+}
+
+// =============================================================================
+// Registration
+// =============================================================================
+
 VEF_GENERATE_ENTRY_POINTS(
   vsql::make_extension()
     .func(make_stats_func<&stats_iqr_result>("STATS_IQR"))
@@ -115,4 +321,11 @@ VEF_GENERATE_ENTRY_POINTS(
     .func(make_stats_func<&stats_median_result>("STATS_MEDIAN"))
     .func(make_stats_func<&stats_iqr_lower_fence_result>("STATS_IQR_LOWER_FENCE"))
     .func(make_stats_func<&stats_iqr_upper_fence_result>("STATS_IQR_UPPER_FENCE"))
+    .func(make_ttest_func<&ttest_t_result>("STATS_TTEST_T"))
+    .func(make_ttest_func<&ttest_df_result>("STATS_TTEST_DF"))
+    .func(make_ttest_func<&ttest_pooled_var_result>("STATS_TTEST_POOLED_VAR"))
+    .func(make_ttest_func<&ttest_p_one_tail_result>("STATS_TTEST_P_ONE_TAIL"))
+    .func(make_ttest_func<&ttest_p_two_tail_result>("STATS_TTEST_P_TWO_TAIL"))
+    .func(make_ttest_crit_func<&ttest_t_crit_one_tail_result>("STATS_TTEST_T_CRIT_ONE_TAIL"))
+    .func(make_ttest_crit_func<&ttest_t_crit_two_tail_result>("STATS_TTEST_T_CRIT_TWO_TAIL"))
 )

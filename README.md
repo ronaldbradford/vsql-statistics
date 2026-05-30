@@ -1,6 +1,6 @@
 # VillageSQL Statistics Extension
 
-Statistical aggregate functions for data scientists — IQR, quartiles, and outlier detection.
+Statistical aggregate functions for data scientists — IQR, quartiles, outlier detection, and two-sample t-tests.
 
 ## Installing
 
@@ -27,9 +27,17 @@ SELECT
   STATS_IQR_UPPER_FENCE(CAST(sale_amount AS DOUBLE)) AS upper_fence
 FROM daily_sales
 GROUP BY region;
+
+-- Test whether two groups differ (group column holds 1 or 2)
+SELECT
+  STATS_TTEST_T(value, grp)          AS t_stat,
+  STATS_TTEST_P_TWO_TAIL(value, grp) AS p_value
+FROM experiment_results;
 ```
 
 ## Function Reference
+
+### IQR Family
 
 | Function | Returns | Description |
 |---|---|---|
@@ -40,11 +48,27 @@ GROUP BY region;
 | `STATS_IQR_LOWER_FENCE(col)` | `DOUBLE` | Q1 − 1.5 × IQR (outlier lower bound) |
 | `STATS_IQR_UPPER_FENCE(col)` | `DOUBLE` | Q3 + 1.5 × IQR (outlier upper bound) |
 
-All functions:
+All IQR functions:
 - Accept any numeric column (`INT`, `DOUBLE`, etc.)
 - Skip NULL values; return NULL for an all-NULL group
 - Use Tukey's hinges (exclusive median) for quartile computation
 - Work with `GROUP BY`
+
+### Two-Sample t-Test Family (equal variances / pooled variance)
+
+The group column must contain the value `1` or `2`; other values are silently ignored.
+
+| Function | Returns | Description |
+|---|---|---|
+| `STATS_TTEST_T(value, grp)` | `DOUBLE` | t-statistic |
+| `STATS_TTEST_DF(value, grp)` | `DOUBLE` | Degrees of freedom (n1 + n2 − 2) |
+| `STATS_TTEST_POOLED_VAR(value, grp)` | `DOUBLE` | Pooled variance |
+| `STATS_TTEST_P_ONE_TAIL(value, grp)` | `DOUBLE` | One-tail p-value |
+| `STATS_TTEST_P_TWO_TAIL(value, grp)` | `DOUBLE` | Two-tail p-value |
+| `STATS_TTEST_T_CRIT_ONE_TAIL(value, grp, alpha)` | `DOUBLE` | One-tail critical value at significance level alpha |
+| `STATS_TTEST_T_CRIT_TWO_TAIL(value, grp, alpha)` | `DOUBLE` | Two-tail critical value at significance level alpha |
+
+All t-test functions return NULL when either group has fewer than 2 non-NULL observations.
 
 ## Building
 

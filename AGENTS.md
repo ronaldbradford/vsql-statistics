@@ -6,7 +6,12 @@ This file provides guidance to AI coding assistants when working with code in th
 
 ## Project Overview
 
-`vsql-statistics` is a VillageSQL extension that provides statistical aggregate functions for data scientists. The initial release implements the IQR (Interquartile Range) family: `STATS_IQR`, `STATS_Q1`, `STATS_Q3`, `STATS_MEDIAN`, `STATS_IQR_LOWER_FENCE`, and `STATS_IQR_UPPER_FENCE`. These functions operate on `DOUBLE` columns and are usable with `GROUP BY`, mirroring the statistical primitives found in Python (numpy/scipy) and R.
+`vsql-statistics` is a VillageSQL extension that provides statistical aggregate functions for data scientists. It implements two families of functions:
+
+- **IQR family (6 functions):** `STATS_IQR`, `STATS_Q1`, `STATS_Q3`, `STATS_MEDIAN`, `STATS_IQR_LOWER_FENCE`, `STATS_IQR_UPPER_FENCE`
+- **Two-sample t-test family (7 functions):** `STATS_TTEST_T`, `STATS_TTEST_DF`, `STATS_TTEST_POOLED_VAR`, `STATS_TTEST_P_ONE_TAIL`, `STATS_TTEST_P_TWO_TAIL`, `STATS_TTEST_T_CRIT_ONE_TAIL`, `STATS_TTEST_T_CRIT_TWO_TAIL`
+
+All functions operate on `DOUBLE` columns and are usable with `GROUP BY`, mirroring statistical primitives found in Python (numpy/scipy) and R.
 
 Install name (underscored): `vsql_statistics`
 Repo/directory name (hyphenated): `vsql-statistics`
@@ -31,7 +36,9 @@ struct StatsState {
     std::vector<double> values;
 };
 ```
-All six aggregate functions share the same `clear()` and `accumulate()` implementations. Each has its own `result()` function that sorts the accumulated values and computes the relevant statistic.
+The IQR family (6 functions) shares one `StatsState` with a single `values` vector, a shared `clear()` and `accumulate()`. Each function has its own `result()` that sorts and computes the statistic.
+
+The t-test family (7 functions) uses `TTestState` with separate `group1`/`group2` vectors and a stored `alpha`. Group membership is passed as the second argument (1 = group 1, 2 = group 2). The 3-parameter critical-value functions also accept alpha directly.
 
 **Quartile algorithm:** Tukey's hinges (exclusive median). For a sorted vector of n values:
 - Lower half: indices [0, n/2)
@@ -43,7 +50,7 @@ All six aggregate functions share the same `clear()` and `accumulate()` implemen
 **Function registration:** `make_aggregate_func<StatsState, &result_fn>(name).returns(REAL).param(REAL).clear<&stats_clear>().accumulate<&stats_accumulate>().build()`
 
 **Key files:**
-- `src/vsql_statistics.cc` — all six aggregate functions
+- `src/vsql_statistics.cc` — all 13 aggregate functions (6 IQR + 7 t-test)
 - `manifest.json` — extension metadata
 - `CMakeLists.txt` — build configuration
 - `cmake/FindVillageSQL.cmake` — SDK discovery
@@ -54,10 +61,10 @@ All six aggregate functions share the same `clear()` and `accumulate()` implemen
 
 ```bash
 # From the VillageSQL prebuilt mysql-test directory:
-perl mysql-test-run.pl --suite=/Users/rbradfor/projects/villagesql/vsql-statistics/mysql-test
+perl mysql-test-run.pl --suite=/path/to/vsql-statistics/mysql-test
 
 # Record results:
-perl mysql-test-run.pl --suite=/Users/rbradfor/projects/villagesql/vsql-statistics/mysql-test --record
+perl mysql-test-run.pl --suite=/path/to/vsql-statistics/mysql-test --record
 ```
 
 See `TESTING.md` for full instructions.
@@ -74,8 +81,9 @@ See `TESTING.md` for full instructions.
 ## Installation
 
 ```sql
-INSTALL EXTENSION 'vsql_statistics';
-SELECT STATS_IQR(col) FROM t GROUP BY group_col;
+INSTALL EXTENSION vsql_statistics;
+SELECT STATS_IQR(CAST(col AS DOUBLE)) FROM t GROUP BY group_col;
+SELECT STATS_TTEST_T(value, grp) FROM t;
 UNINSTALL EXTENSION vsql_statistics;
 ```
 
