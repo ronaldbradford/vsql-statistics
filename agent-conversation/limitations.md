@@ -10,3 +10,5 @@
 
 - **INT→DOUBLE coercion:** Calling STATS_IQR(int_col) on an INT column works — MySQL coerces INT to DOUBLE before the VDF receives it. No explicit CAST required.
 - **No ALTER EXTENSION:** Extension upgrade requires UNINSTALL EXTENSION + INSTALL EXTENSION as separate steps. No in-place upgrade command exists.
+
+- **STATS_MODE hex display in mysql CLI:** VEF 0.0.4 `STRING` return type carries no character set metadata. The MySQL client treats the result as binary and displays it as hex (e.g. `0x5B31355D` instead of `[15]`). The underlying data is correct. Workarounds: `mysql --skip-binary-as-hex` for interactive sessions; `CAST(STATS_MODE(...) AS CHAR)` in SQL. Root cause: VEF ABI has an open question on encoding/collation support (noted in abi/types.h).

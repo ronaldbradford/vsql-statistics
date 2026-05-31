@@ -21,3 +21,58 @@
 - F4 (lazy-sort or insert-sorted): REJECTED — premature optimization; sort runs once per group at result time; the code is already O(n log n) per group which is unavoidable for exact quartiles.
 - F5 (document sort precondition): REJECTED — moot after compute_quartiles takes by value; callers no longer mutate state.
 - F6 (assert(lo < hi) in range_median): APPLIED — bounds assertion added; all three call sites verified safe.
+
+---
+
+## t-Test Simplification (session 2)
+
+### Agent 1: Reuse & AI-Slop — 5 findings, 1 applied
+
+- F1 (merge sum+SSQ loops): REJECTED — two-pass algorithm is numerically stable for a statistics library; computational formula Σv²−n·mean² risks catastrophic cancellation.
+- F2 (template dispatcher for 7 result fns): REJECTED — adds indirection with no runtime benefit; 7 explicit functions are maintainable and readable.
+- F3 (ttest_clear redundant alpha reset): APPLIED — `s = TTestState{}` replaces manual field resets; prevents future field-drift.
+- F4 (remove comment from ttest_t_crit_two_tail_result): REJECTED — comment explains statistical meaning (why alpha is halved), not code mechanics.
+- F5 (two factory templates differ by 1 param): N/A — agent flagged as genuine boundary, no action needed.
+
+### Agent 2: Quality — 7 findings, 0 applied
+
+- F1 (ttest_clear redundant alpha): APPLIED via A1-F3.
+- F2 (alpha overwritten per row): REJECTED — intentional; alpha is a SQL constant expression in practice; validation adds complexity without benefit.
+- F3 (error on non-1/2 group values): REJECTED — silent ignore is documented intentional behavior; VEF has no warning channel.
+- F4 (cache TTestResult): REJECTED — each registered function owns its own TTestState; result() is called exactly once per group per function; nothing to cache.
+- F5 (copy-paste in 7 result fns): REJECTED — overlaps with A1-F2; rejected for same reason.
+- F6 (t_critical leaky abstraction): REJECTED — standard statistical convention; caller context is the correct place for one/two-tail distinction.
+- F7 (factory template duplication): REJECTED — templates differ by accumulate function, not just param count; genuine boundary.
+
+### Agent 3: Efficiency — 4 findings, 1 applied
+
+- E1 (compute_quartiles pass by const ref): APPLIED — changed to `const std::vector<double> &vals_in` with explicit internal copy; makes ownership explicit.
+- E2 (stats_median_result copy): N/A — agent confirmed no fix needed.
+- E3 (cache TTestResult with mutable fields): REJECTED — same as A2-F4; each result() is called once per function per group on its own TTestState; mutable cache adds complexity for zero benefit.
+- E4 (merge 4 loops into 2 with computational formula): REJECTED — same numerical stability concern as A1-F1.
+
+---
+
+## Mode Simplification (session 3)
+
+### Agent 1: Reuse & AI-Slop — 4 findings, 1 applied
+
+- F1 (merge factory templates via const char* NTTP): REJECTED — const char* NTTPs unreliable in C++17; two-template pattern already established in file
+- F2 (std::max_element for max loop): REJECTED — superseded by A2-F3 single-pass which eliminates the loop entirely
+- F3 (trim redundant comment first line): APPLIED — kept only the non-obvious policy line
+- F4 (inline mode_clear as lambda): REJECTED — VEF .template clear<>() requires named function pointer as NTTP; C++17 lambdas cannot fill this role
+
+### Agent 2: Quality — 5 findings, 4 applied
+
+- F1 (factory template duplication): REJECTED — same as A1-F1
+- F2 (min/max result functions sort full vector to take one element): APPLIED — replaced compute_modes with dedicated two-pass helpers over freq; no vector allocation or sort
+- F3 (single-pass compute_modes): APPLIED — collapses two scans into one; also resolves E2 over-reserve
+- F4 (s = ModeState{} in mode_clear): APPLIED — changed to s.freq.clear() to retain bucket allocation across groups
+- F5 (%lld overflow for large doubles): APPLIED — replaced integer/float branch with %g for all values; removes cast, branch, and overflow
+
+### Agent 3: Efficiency — 4 findings, 3 applied
+
+- E1 (mode_clear rebuilds map): APPLIED via A2-F4
+- E2 (over-reserve in compute_modes): N/A — resolved by A2-F3 single-pass
+- E3 (min/max result sort + discard): APPLIED via A2-F2
+- E4 (NaN guard in mode_accumulate): APPLIED — added !std::isnan(v.value()) to prevent unbounded map growth from NaN keys

@@ -1,6 +1,6 @@
 # VillageSQL Statistics Extension
 
-Statistical aggregate functions for data scientists — IQR, quartiles, outlier detection, and two-sample t-tests.
+Statistical aggregate functions for data scientists — IQR, quartiles, outlier detection, two-sample t-tests, and mode.
 
 ## Installing
 
@@ -33,6 +33,13 @@ SELECT
   STATS_TTEST_T(value, grp)          AS t_stat,
   STATS_TTEST_P_TWO_TAIL(value, grp) AS p_value
 FROM experiment_results;
+
+-- Find the most common value(s) in a column
+SELECT
+  STATS_MODE(CAST(score AS DOUBLE))     AS all_modes,
+  STATS_MODE_MIN(CAST(score AS DOUBLE)) AS lowest_mode,
+  STATS_MODE_MAX(CAST(score AS DOUBLE)) AS highest_mode
+FROM survey_responses;
 ```
 
 ## Function Reference
@@ -70,6 +77,22 @@ The group column must contain the value `1` or `2`; other values are silently ig
 
 All t-test functions return NULL when either group has fewer than 2 non-NULL observations.
 
+### Mode Family
+
+| Function | Returns | Description |
+|---|---|---|
+| `STATS_MODE(col)` | `STRING` | JSON array of all values tied for the highest frequency, sorted ascending |
+| `STATS_MODE_MIN(col)` | `DOUBLE` | Smallest value with the highest frequency |
+| `STATS_MODE_MAX(col)` | `DOUBLE` | Largest value with the highest frequency |
+
+All mode functions:
+- Skip NULL and NaN inputs
+- Return NULL when no value appears more than once (including single-row groups and all-unique groups)
+- For unimodal data, `STATS_MODE_MIN` and `STATS_MODE_MAX` return the same value
+- Work with `GROUP BY`
+
+`STATS_MODE` returns a JSON string (e.g. `[24, 29]` for a bimodal dataset). Use `CAST(col AS DOUBLE)` on INT columns — without it the JSON values will be integer-rounded.
+
 ## Building
 
 **Prerequisites:** CMake 3.18+, C++17 compiler, VillageSQL Extension SDK 0.0.4+
@@ -95,6 +118,20 @@ SELECT STATS_IQR(daily_count) FROM espresso_sales;
 ```
 
 **Memory usage for large groups.** Exact quartile computation requires accumulating and sorting all values per group. For groups with millions of rows, memory and CPU cost will be proportional to group size. There is no streaming approximation within VEF.
+
+**STATS_MODE displays as hex in the mysql CLI.** VEF 0.0.4's `STRING` return type carries no character set metadata, so the MySQL client treats the value as binary and displays it as hex (e.g. `0x5B31355D` instead of `[15]`). The data is correct.
+
+Workarounds:
+
+```bash
+# Interactive mysql client — suppress hex display:
+mysql --skip-binary-as-hex
+```
+
+```sql
+-- Or cast in SQL (works in all clients):
+SELECT CAST(STATS_MODE(CAST(val AS DOUBLE)) AS CHAR) AS modes FROM t;
+```
 
 **No in-place upgrade.** Upgrading the extension requires two separate steps:
 

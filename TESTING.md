@@ -34,6 +34,7 @@ Commit the updated `.result` file alongside the `.test` file.
 |---|---|
 | `stats_iqr.test` | All six IQR functions; INT CAST workaround; single-row, two-row, and all-NULL edge cases; GROUP BY |
 | `stats_ttest.test` | All seven t-test functions; reversed-group symmetry; INT CAST workaround; one-group, small-group, and all-NULL edge cases; custom alpha |
+| `stats_mode.test` | All three mode functions; unimodal and bimodal datasets; all-unique and single-row NULL cases; all-NULL column; GROUP BY |
 
 ## Manual Spot-Check
 
@@ -64,5 +65,20 @@ SELECT STATS_TTEST_DF(value, grp)         AS df         FROM ttest_data;  -- 8.0
 SELECT STATS_TTEST_P_TWO_TAIL(value, grp) AS p_two_tail FROM ttest_data;  -- 0.3466
 
 DROP TABLE ttest_data;
+
+-- Mode: unimodal returns single-element array; bimodal returns both values
+-- Note: STATS_MODE returns a binary STRING in VEF 0.0.4; use CAST AS CHAR or
+--       connect with mysql --skip-binary-as-hex to see text instead of hex.
+CREATE TABLE mode_data (val INT NOT NULL);
+INSERT INTO mode_data VALUES (12),(15),(12),(18),(21),(15),(15),(14);
+SELECT CAST(STATS_MODE(CAST(val AS DOUBLE)) AS CHAR) AS modes FROM mode_data;  -- [15]
+
+DELETE FROM mode_data;
+INSERT INTO mode_data VALUES (24),(29),(24),(35),(42),(29),(38),(22);
+SELECT CAST(STATS_MODE(CAST(val AS DOUBLE)) AS CHAR) AS modes     FROM mode_data;  -- [24, 29]
+SELECT STATS_MODE_MIN(CAST(val AS DOUBLE))           AS mode_low  FROM mode_data;  -- 24
+SELECT STATS_MODE_MAX(CAST(val AS DOUBLE))           AS mode_high FROM mode_data;  -- 29
+
+DROP TABLE mode_data;
 UNINSTALL EXTENSION vsql_statistics;
 ```

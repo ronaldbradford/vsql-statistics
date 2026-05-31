@@ -19,10 +19,15 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstdio>
+#include <limits>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 using vsql::RealArg;
 using vsql::RealResult;
+using vsql::StringResult;
 
 // =============================================================================
 // IQR family
@@ -310,6 +315,97 @@ static constexpr auto make_ttest_crit_func(const char *name) {
 }
 
 // =============================================================================
+// Mode family
+// =============================================================================
+
+struct ModeState {
+  std::unordered_map<double, size_t> freq;
+};
+
+static void mode_clear(ModeState &s) {
+  s.freq.clear();
+}
+
+static void mode_accumulate(ModeState &s, RealArg v) {
+  if (!v.is_null() && !std::isnan(v.value())) s.freq[v.value()]++;
+}
+
+// Returns empty if all-NULL input or no value repeats (max freq == 1).
+static std::vector<double> compute_modes(const ModeState &s) {
+  if (s.freq.empty()) return {};
+  size_t max_freq = 0;
+  std::vector<double> modes;
+  for (const auto &kv : s.freq) {
+    if (kv.second > max_freq) {
+      max_freq = kv.second;
+      modes.clear();
+      modes.push_back(kv.first);
+    } else if (kv.second == max_freq) {
+      modes.push_back(kv.first);
+    }
+  }
+  if (max_freq <= 1) return {};
+  std::sort(modes.begin(), modes.end());
+  return modes;
+}
+
+static void stats_mode_result(const ModeState &s, StringResult out) try {
+  auto modes = compute_modes(s);
+  if (modes.empty()) { out.set_null(); return; }
+  std::string json;
+  json.reserve(modes.size() * 8 + 2);
+  json += '[';
+  for (size_t i = 0; i < modes.size(); ++i) {
+    if (i > 0) json += ", ";
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%g", modes[i]);
+    json += buf;
+  }
+  json += ']';
+  out.set(json);
+} catch (...) { out.error("STATS_MODE: unexpected error"); }
+
+static void stats_mode_min_result(const ModeState &s, RealResult out) try {
+  if (s.freq.empty()) { out.set_null(); return; }
+  size_t max_freq = 0;
+  for (const auto &kv : s.freq) if (kv.second > max_freq) max_freq = kv.second;
+  if (max_freq <= 1) { out.set_null(); return; }
+  double result = std::numeric_limits<double>::infinity();
+  for (const auto &kv : s.freq) if (kv.second == max_freq) result = std::min(result, kv.first);
+  out.set(result);
+} catch (...) { out.error("STATS_MODE_MIN: unexpected error"); }
+
+static void stats_mode_max_result(const ModeState &s, RealResult out) try {
+  if (s.freq.empty()) { out.set_null(); return; }
+  size_t max_freq = 0;
+  for (const auto &kv : s.freq) if (kv.second > max_freq) max_freq = kv.second;
+  if (max_freq <= 1) { out.set_null(); return; }
+  double result = -std::numeric_limits<double>::infinity();
+  for (const auto &kv : s.freq) if (kv.second == max_freq) result = std::max(result, kv.first);
+  out.set(result);
+} catch (...) { out.error("STATS_MODE_MAX: unexpected error"); }
+
+template<auto ResultFn>
+static constexpr auto make_mode_real_func(const char *name) {
+  return vsql::make_aggregate_func<ModeState, ResultFn>(name)
+    .returns(vsql::REAL)
+    .param(vsql::REAL)
+    .template clear<&mode_clear>()
+    .template accumulate<&mode_accumulate>()
+    .build();
+}
+
+template<auto ResultFn>
+static constexpr auto make_mode_str_func(const char *name) {
+  return vsql::make_aggregate_func<ModeState, ResultFn>(name)
+    .returns(vsql::STRING)
+    .param(vsql::REAL)
+    .template clear<&mode_clear>()
+    .template accumulate<&mode_accumulate>()
+    .build();
+}
+
+// =============================================================================
 // Registration
 // =============================================================================
 
@@ -328,4 +424,7 @@ VEF_GENERATE_ENTRY_POINTS(
     .func(make_ttest_func<&ttest_p_two_tail_result>("STATS_TTEST_P_TWO_TAIL"))
     .func(make_ttest_crit_func<&ttest_t_crit_one_tail_result>("STATS_TTEST_T_CRIT_ONE_TAIL"))
     .func(make_ttest_crit_func<&ttest_t_crit_two_tail_result>("STATS_TTEST_T_CRIT_TWO_TAIL"))
+    .func(make_mode_str_func<&stats_mode_result>("STATS_MODE"))
+    .func(make_mode_real_func<&stats_mode_min_result>("STATS_MODE_MIN"))
+    .func(make_mode_real_func<&stats_mode_max_result>("STATS_MODE_MAX"))
 )
