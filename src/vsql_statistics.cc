@@ -471,6 +471,67 @@ static constexpr auto make_moment_skew_func(const char *name) {
 }
 
 // =============================================================================
+// One-sample Z-test (known population mean and standard deviation)
+// =============================================================================
+
+struct ZTestState {
+  size_t n = 0;
+  double sum = 0.0;
+  double mu = 0.0;    // population mean (constant; last non-null wins)
+  double sigma = 0.0; // population std dev (constant; last non-null wins; 0 = never set → NULL)
+};
+
+static void ztest_clear(ZTestState &s) { s = ZTestState{}; }
+
+static void ztest_accumulate(ZTestState &s, RealArg value, RealArg mu, RealArg sigma) {
+  if (!mu.is_null())    s.mu    = mu.value();
+  if (!sigma.is_null()) s.sigma = sigma.value();
+  if (value.is_null()) return;
+  s.n++;
+  s.sum += value.value();
+}
+
+// Returns NULL when sigma was never set (0.0), is non-positive, or NaN.
+static bool compute_ztest(const ZTestState &s, double &z) {
+  if (s.n == 0 || !(s.sigma > 0.0)) return false;
+  double mean = s.sum / (double)s.n;
+  z = (mean - s.mu) / (s.sigma / std::sqrt((double)s.n));
+  return true;
+}
+
+static void stats_ztest_z_result(const ZTestState &s, RealResult out) try {
+  double z = 0.0;
+  if (!compute_ztest(s, z)) { out.set_null(); return; }
+  out.set(z);
+} catch (...) { out.error("STATS_ZTEST_Z: unexpected error"); }
+
+// Upper-tail probability: P(Z > z) = 0.5 × erfc(z/√2).
+// Returns values in (0.5, 1] when z < 0 (sample mean below μ).
+static void stats_ztest_p_one_tail_result(const ZTestState &s, RealResult out) try {
+  double z = 0.0;
+  if (!compute_ztest(s, z)) { out.set_null(); return; }
+  out.set(0.5 * std::erfc(z / std::sqrt(2.0)));
+} catch (...) { out.error("STATS_ZTEST_P_ONE_TAIL: unexpected error"); }
+
+static void stats_ztest_p_two_tail_result(const ZTestState &s, RealResult out) try {
+  double z = 0.0;
+  if (!compute_ztest(s, z)) { out.set_null(); return; }
+  out.set(std::erfc(std::fabs(z) / std::sqrt(2.0)));
+} catch (...) { out.error("STATS_ZTEST_P_TWO_TAIL: unexpected error"); }
+
+template<auto ResultFn>
+static constexpr auto make_ztest_func(const char *name) {
+  return vsql::make_aggregate_func<ZTestState, ResultFn>(name)
+    .returns(vsql::REAL)
+    .param(vsql::REAL)
+    .param(vsql::REAL)
+    .param(vsql::REAL)
+    .template clear<&ztest_clear>()
+    .template accumulate<&ztest_accumulate>()
+    .build();
+}
+
+// =============================================================================
 // Registration
 // =============================================================================
 
@@ -494,4 +555,7 @@ VEF_GENERATE_ENTRY_POINTS(
     .func(make_mode_real_func<&stats_mode_max_result>("STATS_MODE_MAX"))
     .func(make_moment_skew_func<&stats_skewness_result>("STATS_SKEWNESS"))
     .func(make_stats_func<&stats_skewness_pearson_result>("STATS_SKEWNESS_PEARSON"))
+    .func(make_ztest_func<&stats_ztest_z_result>("STATS_ZTEST_Z"))
+    .func(make_ztest_func<&stats_ztest_p_one_tail_result>("STATS_ZTEST_P_ONE_TAIL"))
+    .func(make_ztest_func<&stats_ztest_p_two_tail_result>("STATS_ZTEST_P_TWO_TAIL"))
 )

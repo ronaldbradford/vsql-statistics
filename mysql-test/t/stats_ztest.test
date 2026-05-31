@@ -1,0 +1,71 @@
+# vsql_statistics: one-sample z-test aggregate functions
+INSTALL EXTENSION vsql_statistics;
+CREATE DATABASE IF NOT EXISTS vsql_test;
+USE vsql_test;
+CREATE TABLE ztest_data (val DOUBLE);
+
+# --- Spec reference: n=40, mean=511.0775, mu=500, sigma=40 → Z≈1.7515, p_two≈0.0799 ---
+INSERT INTO ztest_data VALUES
+  (511.0775),(511.0775),(511.0775),(511.0775),(511.0775),
+  (511.0775),(511.0775),(511.0775),(511.0775),(511.0775),
+  (511.0775),(511.0775),(511.0775),(511.0775),(511.0775),
+  (511.0775),(511.0775),(511.0775),(511.0775),(511.0775),
+  (511.0775),(511.0775),(511.0775),(511.0775),(511.0775),
+  (511.0775),(511.0775),(511.0775),(511.0775),(511.0775),
+  (511.0775),(511.0775),(511.0775),(511.0775),(511.0775),
+  (511.0775),(511.0775),(511.0775),(511.0775),(511.0775);
+SELECT ROUND(STATS_ZTEST_Z(val, 500.0, 40.0), 4)            AS z         FROM ztest_data;
+SELECT ROUND(STATS_ZTEST_P_TWO_TAIL(val, 500.0, 40.0), 4)   AS p_two     FROM ztest_data;
+SELECT ROUND(STATS_ZTEST_P_ONE_TAIL(val, 500.0, 40.0), 4)   AS p_one     FROM ztest_data;
+DELETE FROM ztest_data;
+
+# --- Hand-verifiable: 4 equal values, mu=3, sigma=2 → Z=(4-3)/(2/2)=1.0 ---
+INSERT INTO ztest_data VALUES (4),(4),(4),(4);
+SELECT STATS_ZTEST_Z(val, 3.0, 2.0)            AS z         FROM ztest_data;
+SELECT STATS_ZTEST_P_TWO_TAIL(val, 3.0, 2.0)   AS p_two     FROM ztest_data;
+SELECT STATS_ZTEST_P_ONE_TAIL(val, 3.0, 2.0)   AS p_one     FROM ztest_data;
+DELETE FROM ztest_data;
+
+# --- Single row: n=1 produces a valid Z-score (unlike t-test which requires n>=2) ---
+INSERT INTO ztest_data VALUES (510.0);
+SELECT ROUND(STATS_ZTEST_Z(val, 500.0, 40.0), 4) AS z FROM ztest_data;
+DELETE FROM ztest_data;
+
+# --- All-NULL: all three functions return NULL ---
+INSERT INTO ztest_data VALUES (NULL),(NULL),(NULL);
+SELECT STATS_ZTEST_Z(val, 500.0, 40.0)            AS z     FROM ztest_data;
+SELECT STATS_ZTEST_P_ONE_TAIL(val, 500.0, 40.0)   AS p_one FROM ztest_data;
+SELECT STATS_ZTEST_P_TWO_TAIL(val, 500.0, 40.0)   AS p_two FROM ztest_data;
+DELETE FROM ztest_data;
+
+# --- sigma=0: all three functions return NULL ---
+INSERT INTO ztest_data VALUES (510.0),(520.0),(530.0);
+SELECT STATS_ZTEST_Z(val, 500.0, 0.0)            AS z     FROM ztest_data;
+SELECT STATS_ZTEST_P_ONE_TAIL(val, 500.0, 0.0)   AS p_one FROM ztest_data;
+SELECT STATS_ZTEST_P_TWO_TAIL(val, 500.0, 0.0)   AS p_two FROM ztest_data;
+DELETE FROM ztest_data;
+
+# --- Negative Z (mean < mu): one-tail p-value > 0.5, two-tail matches |Z| ---
+INSERT INTO ztest_data VALUES (490.0),(490.0),(490.0),(490.0);
+SELECT STATS_ZTEST_Z(val, 500.0, 2.0)          AS z         FROM ztest_data;
+SELECT STATS_ZTEST_P_TWO_TAIL(val, 500.0, 2.0) AS p_two     FROM ztest_data;
+SELECT STATS_ZTEST_P_ONE_TAIL(val, 500.0, 2.0) > 0.5 AS p_one_gt_half FROM ztest_data;
+DELETE FROM ztest_data;
+
+# --- GROUP BY: Z-test computed independently per group ---
+CREATE TABLE vsql_test.ztest_grouped (grp INT, val DOUBLE);
+INSERT INTO ztest_grouped VALUES
+  (1,4),(1,4),(1,4),(1,4),
+  (2,3),(2,3),(2,3),(2,3),(2,3),(2,3),(2,3),(2,3),(2,3);
+SELECT grp,
+  STATS_ZTEST_Z(val, 3.0, 2.0)            AS z,
+  STATS_ZTEST_P_TWO_TAIL(val, 3.0, 2.0)   AS p_two
+FROM vsql_test.ztest_grouped
+GROUP BY grp
+ORDER BY grp;
+DROP TABLE vsql_test.ztest_grouped;
+
+DROP TABLE ztest_data;
+DROP DATABASE vsql_test;
+
+UNINSTALL EXTENSION vsql_statistics;

@@ -1,6 +1,6 @@
 # VillageSQL Statistics Extension
 
-Statistical aggregate functions for data scientists — IQR, quartiles, outlier detection, two-sample t-tests, mode, and skewness.
+Statistical aggregate functions for data scientists — IQR, quartiles, outlier detection, two-sample t-tests, one-sample z-tests, mode, and skewness.
 
 ## Installing
 
@@ -46,6 +46,12 @@ SELECT
   STATS_SKEWNESS(salary)         AS skewness,
   STATS_SKEWNESS_PEARSON(salary) AS skewness_pearson
 FROM employee_compensation;
+
+-- One-sample z-test: is this batch's mean consistent with the known population?
+SELECT
+  STATS_ZTEST_Z(measurement, 500.0, 40.0)            AS z_stat,
+  STATS_ZTEST_P_TWO_TAIL(measurement, 500.0, 40.0)   AS p_value
+FROM quality_checks;
 ```
 
 ## Function Reference
@@ -98,6 +104,24 @@ All mode functions:
 - Work with `GROUP BY`
 
 `STATS_MODE` returns a JSON string (e.g. `[24, 29]` for a bimodal dataset). Use `CAST(col AS DOUBLE)` on INT columns — without it the JSON values will be integer-rounded.
+
+### One-Sample Z-Test Family (known population mean and standard deviation)
+
+All three functions take `(value, mu, sigma)` where `mu` and `sigma` are the known population mean and standard deviation respectively.
+
+| Function | Returns | Description |
+|---|---|---|
+| `STATS_ZTEST_Z(value, mu, sigma)` | `DOUBLE` | Z-statistic: (x̄ − μ) / (σ / √n) |
+| `STATS_ZTEST_P_ONE_TAIL(value, mu, sigma)` | `DOUBLE` | Upper-tail probability: P(Z > z) |
+| `STATS_ZTEST_P_TWO_TAIL(value, mu, sigma)` | `DOUBLE` | Two-tail probability: P(\|Z\| > \|z\|) |
+
+All z-test functions:
+- Skip NULL values in the `value` column; return NULL for an all-NULL group
+- Return NULL when `sigma` ≤ 0 or was never supplied (all-NULL sigma column)
+- Return NULL when `sigma` is NaN
+- Work with `GROUP BY`
+
+`STATS_ZTEST_P_ONE_TAIL` returns the upper-tail probability P(Z > z). When the sample mean is below μ (z < 0), this returns a value > 0.5 — indicating evidence against the upper-tail alternative. Use `STATS_ZTEST_P_TWO_TAIL` when you are testing for any deviation from μ rather than a directional hypothesis.
 
 ### Skewness Family
 

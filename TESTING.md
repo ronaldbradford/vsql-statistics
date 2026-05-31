@@ -36,6 +36,7 @@ Commit the updated `.result` file alongside the `.test` file.
 | `stats_ttest.test` | All seven t-test functions; reversed-group symmetry; INT CAST workaround; one-group, small-group, and all-NULL edge cases; custom alpha |
 | `stats_mode.test` | All three mode functions; unimodal and bimodal datasets; all-unique and single-row NULL cases; all-NULL column; GROUP BY |
 | `stats_skewness.test` | Both skewness functions; symmetric, right-skewed, and left-skewed datasets; all-NULL, single-row, and all-equal-value edge cases; GROUP BY; uses `vsql_test` database |
+| `stats_ztest.test` | All three z-test functions; spec reference example (n=40); hand-verifiable Z=1.0 case; single-row; all-NULL; sigma=0; negative Z one-tail; GROUP BY; uses `vsql_test` database |
 
 ## Manual Spot-Check
 
@@ -93,5 +94,22 @@ SELECT STATS_SKEWNESS(val)         AS skewness         FROM skew_data;  -- 0.656
 SELECT STATS_SKEWNESS_PEARSON(val) AS skewness_pearson FROM skew_data;  -- 0.75
 
 DROP TABLE skew_data;
+
+-- Z-test: spec reference example (n=40, mu=500, sigma=40, mean=511.0775 → Z≈1.7515)
+CREATE TABLE ztest_data (val DOUBLE);
+INSERT INTO ztest_data VALUES
+  (511.0775),(511.0775),(511.0775),(511.0775),(511.0775),
+  (511.0775),(511.0775),(511.0775),(511.0775),(511.0775),
+  (511.0775),(511.0775),(511.0775),(511.0775),(511.0775),
+  (511.0775),(511.0775),(511.0775),(511.0775),(511.0775),
+  (511.0775),(511.0775),(511.0775),(511.0775),(511.0775),
+  (511.0775),(511.0775),(511.0775),(511.0775),(511.0775),
+  (511.0775),(511.0775),(511.0775),(511.0775),(511.0775),
+  (511.0775),(511.0775),(511.0775),(511.0775),(511.0775);
+SELECT ROUND(STATS_ZTEST_Z(val, 500.0, 40.0), 4)          AS z        FROM ztest_data;  -- 1.7515
+SELECT ROUND(STATS_ZTEST_P_TWO_TAIL(val, 500.0, 40.0), 4) AS p_two    FROM ztest_data;  -- 0.0799
+SELECT ROUND(STATS_ZTEST_P_ONE_TAIL(val, 500.0, 40.0), 4) AS p_one    FROM ztest_data;  -- 0.0399
+
+DROP TABLE ztest_data;
 UNINSTALL EXTENSION vsql_statistics;
 ```

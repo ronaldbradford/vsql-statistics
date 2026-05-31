@@ -12,6 +12,7 @@ This file provides guidance to AI coding assistants when working with code in th
 - **Two-sample t-test family (7 functions):** `STATS_TTEST_T`, `STATS_TTEST_DF`, `STATS_TTEST_POOLED_VAR`, `STATS_TTEST_P_ONE_TAIL`, `STATS_TTEST_P_TWO_TAIL`, `STATS_TTEST_T_CRIT_ONE_TAIL`, `STATS_TTEST_T_CRIT_TWO_TAIL`
 - **Mode family (3 functions):** `STATS_MODE`, `STATS_MODE_MIN`, `STATS_MODE_MAX`
 - **Skewness family (2 functions):** `STATS_SKEWNESS`, `STATS_SKEWNESS_PEARSON`
+- **Z-test family (3 functions):** `STATS_ZTEST_Z`, `STATS_ZTEST_P_ONE_TAIL`, `STATS_ZTEST_P_TWO_TAIL`
 
 All functions operate on `DOUBLE` columns and are usable with `GROUP BY`, mirroring statistical primitives found in Python (numpy/scipy) and R.
 
@@ -46,6 +47,8 @@ The mode family (3 functions) uses `ModeState` with `std::unordered_map<double, 
 
 The skewness family (2 functions) uses two separate states. `STATS_SKEWNESS` uses `SkewState` — a streaming accumulator of n, Σx, Σx², Σx³ (shifted by the first observed value to reduce floating-point cancellation); no vector storage, O(1) memory per group. `STATS_SKEWNESS_PEARSON` reuses `StatsState` (vector of doubles) for median access. Both return NULL when variance is zero or n < 2.
 
+The z-test family (3 functions) uses `ZTestState` — streaming accumulator of n and Σx, plus stored `mu` and `sigma` constants (last non-null wins per row; sigma defaults to 0.0 so all-null sigma returns NULL). `STATS_ZTEST_P_ONE_TAIL` returns the upper-tail probability P(Z > z), which is > 0.5 when the sample mean is below μ. All three return NULL when n=0, sigma≤0, or sigma is NaN.
+
 **Quartile algorithm:** Tukey's hinges (exclusive median). For a sorted vector of n values:
 - Lower half: indices [0, n/2)
 - Upper half: indices [n/2+1, n) for odd n, [n/2, n) for even n
@@ -56,7 +59,7 @@ The skewness family (2 functions) uses two separate states. `STATS_SKEWNESS` use
 **Function registration:** `make_aggregate_func<StatsState, &result_fn>(name).returns(REAL).param(REAL).clear<&stats_clear>().accumulate<&stats_accumulate>().build()`
 
 **Key files:**
-- `src/vsql_statistics.cc` — all 18 aggregate functions (6 IQR + 7 t-test + 3 mode + 2 skewness)
+- `src/vsql_statistics.cc` — all 21 aggregate functions (6 IQR + 7 t-test + 3 mode + 2 skewness + 3 z-test)
 - `manifest.json` — extension metadata
 - `CMakeLists.txt` — build configuration
 - `cmake/FindVillageSQL.cmake` — SDK discovery
@@ -93,6 +96,8 @@ SELECT STATS_TTEST_T(value, grp) FROM t;
 SELECT STATS_MODE(CAST(col AS DOUBLE)) FROM t;
 SELECT STATS_SKEWNESS(col) FROM t;
 SELECT STATS_SKEWNESS_PEARSON(col) FROM t;
+SELECT STATS_ZTEST_Z(col, 500.0, 40.0) FROM t;
+SELECT STATS_ZTEST_P_TWO_TAIL(col, 500.0, 40.0) FROM t;
 UNINSTALL EXTENSION vsql_statistics;
 ```
 
