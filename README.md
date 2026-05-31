@@ -1,6 +1,6 @@
 # VillageSQL Statistics Extension
 
-Statistical aggregate functions for data scientists — IQR, quartiles, outlier detection, two-sample t-tests, and mode.
+Statistical aggregate functions for data scientists — IQR, quartiles, outlier detection, two-sample t-tests, mode, and skewness.
 
 ## Installing
 
@@ -40,6 +40,12 @@ SELECT
   STATS_MODE_MIN(CAST(score AS DOUBLE)) AS lowest_mode,
   STATS_MODE_MAX(CAST(score AS DOUBLE)) AS highest_mode
 FROM survey_responses;
+
+-- Measure distribution asymmetry
+SELECT
+  STATS_SKEWNESS(salary)         AS skewness,
+  STATS_SKEWNESS_PEARSON(salary) AS skewness_pearson
+FROM employee_compensation;
 ```
 
 ## Function Reference
@@ -92,6 +98,22 @@ All mode functions:
 - Work with `GROUP BY`
 
 `STATS_MODE` returns a JSON string (e.g. `[24, 29]` for a bimodal dataset). Use `CAST(col AS DOUBLE)` on INT columns — without it the JSON values will be integer-rounded.
+
+### Skewness Family
+
+| Function | Returns | Description |
+|---|---|---|
+| `STATS_SKEWNESS(col)` | `DOUBLE` | Population skewness: third standardized moment g₁ = m₃ / m₂^(3/2) |
+| `STATS_SKEWNESS_PEARSON(col)` | `DOUBLE` | Pearson's median skewness: 3 × (mean − median) / σ |
+
+Both skewness functions:
+- Skip NULL values; return NULL for an all-NULL group
+- Return NULL for a single-row group or when all values are equal (zero variance)
+- Work with `GROUP BY`
+
+`STATS_SKEWNESS` uses a streaming accumulator (no value storage) — memory cost is O(1) per group regardless of group size. `STATS_SKEWNESS_PEARSON` requires storing all values to compute the median — memory cost is O(n) per group.
+
+Positive values indicate right-skewed distributions (long right tail); negative values indicate left-skewed (long left tail); zero indicates symmetry.
 
 ## Building
 

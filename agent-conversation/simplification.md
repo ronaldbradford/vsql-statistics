@@ -76,3 +76,36 @@
 - E2 (over-reserve in compute_modes): N/A — resolved by A2-F3 single-pass
 - E3 (min/max result sort + discard): APPLIED via A2-F2
 - E4 (NaN guard in mode_accumulate): APPLIED — added !std::isnan(v.value()) to prevent unbounded map growth from NaN keys
+
+---
+
+## Skewness Simplification (session 4)
+
+### Agent 1: Reuse & AI-Slop — 6 findings, 1 applied
+
+- F1 (std::accumulate/inner_product for loops): REJECTED — not a meaningful deduplication; inner_product approach risks same cancellation flagged by A3-E6
+- F2 (move sort after mean loop): APPLIED via A2-F3 restructure — mean now computed from s.values before copy+sort
+- F3 (n<3 guard for both functions): REJECTED — n=2 is mathematically valid for both formulas; m2<=0 guard handles degenerate cases
+- F4 (remove try/catch): REJECTED — required project convention per AGENTS.md
+- F5 (make_moment_skew_func single caller): Not actionable — correctly identified as not a problem
+- F6 (remove second comment line): REJECTED — "avoid storing individual values" explains the non-obvious WHY (streaming vs. storing all values)
+
+### Agent 2: Quality — 7 findings, 2 applied
+
+- F1, F2: Not findings (confirmed no issue)
+- F3 (std::accumulate for mean): APPLIED — cleaner, one line; also allows deferring copy+sort until after stddev check
+- F4 (extract compute_variance helper): REJECTED — premature abstraction for a single call site
+- F5 (kMinSamples constant): REJECTED — adds boilerplate; n < 2 is self-documenting
+- F6 (rename make_skew_func → make_moment_skew_func): APPLIED — clarifies that this factory is for moment-based (SkewState) only; prevents accidental misuse with Pearson result fn
+- F7 (stringly-typed error messages): REJECTED — consistent with all 16 existing functions in the file
+
+### Agent 3: Efficiency — 8 findings, 2 applied
+
+- E1: Not a finding
+- E2 (cache x² in skew_accumulate): APPLIED — `double x2 = x*x; sum_sq += x2; sum_cu += x2*x`
+- E3 (heap allocation necessary): Confirmed unavoidable
+- E4 (two passes unavoidable): Confirmed clean
+- E5 (StatsState lacks running sum): Design boundary — can't fix without changing shared state
+- E6 (shift accumulator by first value for numerical stability): APPLIED — `ref` field added; centering eliminates catastrophic cancellation for large/offset inputs (e.g., salary data)
+- E7 (n<2 redundant with m2 guard): REJECTED — cheap fast-path; harmless
+- E8 (range_median bound): REJECTED — hi is exclusive per existing implementation; call `range_median(vals, 0, n)` is correct

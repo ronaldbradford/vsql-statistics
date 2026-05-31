@@ -62,3 +62,18 @@ Note: INT columns require CAST(col AS DOUBLE). All criteria use CAST(val AS DOUB
 28. Given all-unique {1,2,3,4}, STATS_MODE_MAX(CAST(val AS DOUBLE)) must return NULL
 29. Given a single-row {42}, STATS_MODE(CAST(val AS DOUBLE)) must return NULL
 30. Given a nullable DOUBLE column where all rows are NULL, STATS_MODE(col) must return NULL
+
+## Skewness Functions (session 4)
+
+31. Given {1,2,3,4,5} (symmetric), STATS_SKEWNESS(CAST(val AS DOUBLE)) must return 0.
+32. Given {2,4,4,4,5,5,7,9} (right-skewed), STATS_SKEWNESS(CAST(val AS DOUBLE)) must return 0.65625.
+33. Given an all-NULL group, STATS_SKEWNESS(col) must return NULL.
+34. Given a single-row group, STATS_SKEWNESS(CAST(val AS DOUBLE)) must return NULL.
+35. Given a group where all values are equal, STATS_SKEWNESS(CAST(val AS DOUBLE)) must return NULL.
+36. Given {2,2,2,2,2,2,2,100} (right-skewed), STATS_SKEWNESS must return a positive value.
+37. Given {1,100,100,100,100,100,100,100} (left-skewed), STATS_SKEWNESS must return a negative value.
+38. STATS_SKEWNESS must work correctly with GROUP BY.
+39. Given {2,4,4,4,5,5,7,9} (mean=5, median=4.5, σ=2), STATS_SKEWNESS_PEARSON(CAST(val AS DOUBLE)) must return 0.75.
+40. Given an all-NULL group, STATS_SKEWNESS_PEARSON(col) must return NULL.
+41. Given a single-row group, STATS_SKEWNESS_PEARSON(CAST(val AS DOUBLE)) must return NULL.
+42. STATS_SKEWNESS_PEARSON must work correctly with GROUP BY.

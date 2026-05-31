@@ -1,0 +1,63 @@
+# vsql_statistics: skewness aggregate functions
+INSTALL EXTENSION vsql_statistics;
+CREATE DATABASE IF NOT EXISTS vsql_test;
+USE vsql_test;
+CREATE TABLE skew_data (val DOUBLE);
+
+# --- Symmetric dataset: skewness is exactly zero ---
+INSERT INTO skew_data VALUES (1),(2),(3),(4),(5);
+SELECT STATS_SKEWNESS(val)         AS skewness        FROM skew_data;
+SELECT STATS_SKEWNESS_PEARSON(val) AS skewness_pearson FROM skew_data;
+DELETE FROM skew_data;
+
+# --- Right-skewed dataset {2,4,4,4,5,5,7,9}: g1=0.65625, Pearson=0.75 ---
+INSERT INTO skew_data VALUES (2),(4),(4),(4),(5),(5),(7),(9);
+SELECT STATS_SKEWNESS(val)         AS skewness        FROM skew_data;
+SELECT STATS_SKEWNESS_PEARSON(val) AS skewness_pearson FROM skew_data;
+DELETE FROM skew_data;
+
+# --- Right-skewed: result must be positive ---
+INSERT INTO skew_data VALUES (2),(2),(2),(2),(2),(2),(2),(100);
+SELECT STATS_SKEWNESS(val) > 0 AS is_positive FROM skew_data;
+DELETE FROM skew_data;
+
+# --- Left-skewed: result must be negative ---
+INSERT INTO skew_data VALUES (1),(100),(100),(100),(100),(100),(100),(100);
+SELECT STATS_SKEWNESS(val) < 0 AS is_negative FROM skew_data;
+DELETE FROM skew_data;
+
+# --- All-NULL: both functions return NULL ---
+INSERT INTO skew_data VALUES (NULL),(NULL),(NULL);
+SELECT STATS_SKEWNESS(val)         AS skewness        FROM skew_data;
+SELECT STATS_SKEWNESS_PEARSON(val) AS skewness_pearson FROM skew_data;
+DELETE FROM skew_data;
+
+# --- Single row: both functions return NULL (variance undefined) ---
+INSERT INTO skew_data VALUES (42);
+SELECT STATS_SKEWNESS(val)         AS skewness        FROM skew_data;
+SELECT STATS_SKEWNESS_PEARSON(val) AS skewness_pearson FROM skew_data;
+DELETE FROM skew_data;
+
+# --- All equal values: variance is zero, both functions return NULL ---
+INSERT INTO skew_data VALUES (5),(5),(5),(5),(5);
+SELECT STATS_SKEWNESS(val)         AS skewness        FROM skew_data;
+SELECT STATS_SKEWNESS_PEARSON(val) AS skewness_pearson FROM skew_data;
+DELETE FROM skew_data;
+
+DROP TABLE skew_data;
+
+# --- GROUP BY: skewness computed independently per group ---
+CREATE TABLE vsql_test.skew_grouped (grp INT, val DOUBLE);
+INSERT INTO skew_grouped VALUES
+  (1,1),(1,2),(1,3),(1,4),(1,5),
+  (2,2),(2,4),(2,4),(2,4),(2,5),(2,5),(2,7),(2,9);
+SELECT grp,
+  STATS_SKEWNESS(val)         AS skewness,
+  STATS_SKEWNESS_PEARSON(val) AS skewness_pearson
+FROM vsql_test.skew_grouped
+GROUP BY grp
+ORDER BY grp;
+DROP TABLE vsql_test.skew_grouped;
+DROP DATABASE vsql_test;
+
+UNINSTALL EXTENSION vsql_statistics;

@@ -35,6 +35,7 @@ Commit the updated `.result` file alongside the `.test` file.
 | `stats_iqr.test` | All six IQR functions; INT CAST workaround; single-row, two-row, and all-NULL edge cases; GROUP BY |
 | `stats_ttest.test` | All seven t-test functions; reversed-group symmetry; INT CAST workaround; one-group, small-group, and all-NULL edge cases; custom alpha |
 | `stats_mode.test` | All three mode functions; unimodal and bimodal datasets; all-unique and single-row NULL cases; all-NULL column; GROUP BY |
+| `stats_skewness.test` | Both skewness functions; symmetric, right-skewed, and left-skewed datasets; all-NULL, single-row, and all-equal-value edge cases; GROUP BY; uses `vsql_test` database |
 
 ## Manual Spot-Check
 
@@ -80,5 +81,17 @@ SELECT STATS_MODE_MIN(CAST(val AS DOUBLE))           AS mode_low  FROM mode_data
 SELECT STATS_MODE_MAX(CAST(val AS DOUBLE))           AS mode_high FROM mode_data;  -- 29
 
 DROP TABLE mode_data;
+
+-- Skewness: symmetric returns 0; right-skewed returns positive; Pearson cross-check
+CREATE TABLE skew_data (val DOUBLE);
+INSERT INTO skew_data VALUES (1),(2),(3),(4),(5);
+SELECT STATS_SKEWNESS(val) AS skewness FROM skew_data;          -- 0
+
+DELETE FROM skew_data;
+INSERT INTO skew_data VALUES (2),(4),(4),(4),(5),(5),(7),(9);
+SELECT STATS_SKEWNESS(val)         AS skewness         FROM skew_data;  -- 0.65625
+SELECT STATS_SKEWNESS_PEARSON(val) AS skewness_pearson FROM skew_data;  -- 0.75
+
+DROP TABLE skew_data;
 UNINSTALL EXTENSION vsql_statistics;
 ```

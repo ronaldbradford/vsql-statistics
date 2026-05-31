@@ -21,6 +21,7 @@
 #include <cmath>
 #include <cstdio>
 #include <limits>
+#include <numeric>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -406,6 +407,70 @@ static constexpr auto make_mode_str_func(const char *name) {
 }
 
 // =============================================================================
+// Skewness family
+// =============================================================================
+
+struct SkewState {
+  size_t n = 0;
+  double ref = 0.0;  // first observed value; centering reduces floating-point cancellation
+  double sum = 0.0;
+  double sum_sq = 0.0;
+  double sum_cu = 0.0;
+};
+
+static void skew_clear(SkewState &s) { s = SkewState{}; }
+
+static void skew_accumulate(SkewState &s, RealArg v) {
+  if (v.is_null()) return;
+  if (s.n == 0) s.ref = v.value();
+  double x = v.value() - s.ref;
+  double x2 = x * x;
+  s.n++;
+  s.sum += x;
+  s.sum_sq += x2;
+  s.sum_cu += x2 * x;
+}
+
+// Population skewness: third standardized moment g₁ = m₃ / m₂^(3/2).
+// Uses the expanded-moment identities to avoid storing individual values.
+static void stats_skewness_result(const SkewState &s, RealResult out) try {
+  if (s.n < 2) { out.set_null(); return; }
+  double mean = s.sum / (double)s.n;
+  double m2 = s.sum_sq / (double)s.n - mean * mean;
+  if (m2 <= 0.0) { out.set_null(); return; }
+  double m3 = s.sum_cu / (double)s.n
+              - 3.0 * mean * s.sum_sq / (double)s.n
+              + 2.0 * mean * mean * mean;
+  out.set(m3 / std::pow(m2, 1.5));
+} catch (...) { out.error("STATS_SKEWNESS: unexpected error"); }
+
+// Pearson's median skewness: 3 × (mean − median) / population_stddev.
+// Requires value storage for median; reuses StatsState/stats_accumulate.
+static void stats_skewness_pearson_result(const StatsState &s, RealResult out) try {
+  size_t n = s.values.size();
+  if (n < 2) { out.set_null(); return; }
+  double mean = std::accumulate(s.values.begin(), s.values.end(), 0.0) / (double)n;
+  double variance = 0.0;
+  for (double v : s.values) variance += (v - mean) * (v - mean);
+  variance /= (double)n;
+  double stddev = std::sqrt(variance);
+  if (stddev == 0.0) { out.set_null(); return; }
+  auto vals = s.values;
+  std::sort(vals.begin(), vals.end());
+  out.set(3.0 * (mean - range_median(vals, 0, n)) / stddev);
+} catch (...) { out.error("STATS_SKEWNESS_PEARSON: unexpected error"); }
+
+template<auto ResultFn>
+static constexpr auto make_moment_skew_func(const char *name) {
+  return vsql::make_aggregate_func<SkewState, ResultFn>(name)
+    .returns(vsql::REAL)
+    .param(vsql::REAL)
+    .template clear<&skew_clear>()
+    .template accumulate<&skew_accumulate>()
+    .build();
+}
+
+// =============================================================================
 // Registration
 // =============================================================================
 
@@ -427,4 +492,6 @@ VEF_GENERATE_ENTRY_POINTS(
     .func(make_mode_str_func<&stats_mode_result>("STATS_MODE"))
     .func(make_mode_real_func<&stats_mode_min_result>("STATS_MODE_MIN"))
     .func(make_mode_real_func<&stats_mode_max_result>("STATS_MODE_MAX"))
+    .func(make_moment_skew_func<&stats_skewness_result>("STATS_SKEWNESS"))
+    .func(make_stats_func<&stats_skewness_pearson_result>("STATS_SKEWNESS_PEARSON"))
 )
