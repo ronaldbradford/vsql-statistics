@@ -50,8 +50,8 @@ static void stats_accumulate(StatsState &s, RealArg v) {
 // Median of a sorted sub-range [lo, hi).
 static double range_median(const std::vector<double> &v, size_t lo, size_t hi) {
   assert(lo < hi);
-  size_t n = hi - lo;
-  size_t mid = lo + n / 2;
+  const size_t n = hi - lo;
+  const size_t mid = lo + n / 2;
   return (n % 2 == 1) ? v[mid] : (v[mid - 1] + v[mid]) / 2.0;
 }
 
@@ -133,8 +133,8 @@ static void ttest_clear(TTestState &s) {
 // group == 1.0 → group1, group == 2.0 → group2; other values are ignored.
 static void ttest_accumulate(TTestState &s, RealArg value, RealArg group) {
   if (value.is_null() || group.is_null()) return;
-  double v = value.value();
-  double g = group.value();
+  const double v = value.value();
+  const double g = group.value();
   if (std::isnan(v) || std::isnan(g)) return;
   if (g == 1.0)      s.group1.push_back(v);
   else if (g == 2.0) s.group2.push_back(v);
@@ -154,9 +154,9 @@ static double betacf(double x, double a, double b) {
   constexpr double tiny     = 1e-30;
   constexpr double eps      = 1e-12;
 
-  double qab = a + b;
-  double qap = a + 1.0;
-  double qam = a - 1.0;
+  const double qab = a + b;
+  const double qap = a + 1.0;
+  const double qam = a - 1.0;
   double c = 1.0;
   double d = 1.0 - qab * x / qap;
   if (std::fabs(d) < tiny) d = tiny;
@@ -164,7 +164,7 @@ static double betacf(double x, double a, double b) {
   double h = d;
 
   for (int m = 1; m <= max_iter; m++) {
-    int m2 = 2 * m;
+    const int m2 = 2 * m;
     // Even step
     double aa = static_cast<double>(m) * (b - static_cast<double>(m)) * x
                 / ((qam + m2) * (a + m2));
@@ -176,7 +176,7 @@ static double betacf(double x, double a, double b) {
          / ((a + m2) * (qap + m2));
     d = 1.0 + aa * d; if (std::fabs(d) < tiny) d = tiny; d = 1.0 / d;
     c = 1.0 + aa / c; if (std::fabs(c) < tiny) c = tiny;
-    double del = d * c;
+    const double del = d * c;
     h *= del;
     if (std::fabs(del - 1.0) < eps) break;
   }
@@ -189,14 +189,14 @@ static double betai(double x, double a, double b) {
   if (x >= 1.0) return 1.0;
   // Use symmetry I_x(a,b) = 1 - I_{1-x}(b,a) when x is large for convergence.
   if (x > (a + 1.0) / (a + b + 2.0)) return 1.0 - betai(1.0 - x, b, a);
-  double lbeta_ab = std::lgamma(a) + std::lgamma(b) - std::lgamma(a + b);
-  double front = std::exp(a * std::log(x) + b * std::log(1.0 - x) - lbeta_ab) / a;
+  const double lbeta_ab = std::lgamma(a) + std::lgamma(b) - std::lgamma(a + b);
+  const double front = std::exp(a * std::log(x) + b * std::log(1.0 - x) - lbeta_ab) / a;
   return front * betacf(x, a, b);
 }
 
 // Two-tail p-value: P(|T_df| > |t|) using the incomplete beta function.
 static double t_two_tail_p(double t, double df) {
-  double x = df / (df + t * t);
+  const double x = df / (df + t * t);
   return betai(x, df / 2.0, 0.5);
 }
 
@@ -210,7 +210,7 @@ static double t_critical(double alpha, double df) {
     hi *= 2.0;
   }
   for (int i = 0; i < 200; i++) {
-    double mid = (lo + hi) / 2.0;
+    const double mid = (lo + hi) / 2.0;
     if (t_two_tail_p(mid, df) / 2.0 > alpha) lo = mid;
     else                                       hi = mid;
   }
@@ -240,8 +240,8 @@ static std::optional<TTestResult> compute_ttest(const TTestState &s) {
 
   double ssq1 = 0.0;
   double ssq2 = 0.0;
-  for (double v : s.group1) ssq1 += (v - mean1) * (v - mean1);
-  for (double v : s.group2) ssq2 += (v - mean2) * (v - mean2);
+  for (const double v : s.group1) ssq1 += (v - mean1) * (v - mean1);
+  for (const double v : s.group2) ssq2 += (v - mean2) * (v - mean2);
 
   const double df         = static_cast<double>(n1 + n2 - 2);
   const double pooled_var = (ssq1 + ssq2) / df;
@@ -362,7 +362,7 @@ static std::vector<double> compute_modes(const ModeState &s) {
 }
 
 static void stats_mode_result(const ModeState &s, StringResult out) try {
-  auto modes = compute_modes(s);
+  const auto modes = compute_modes(s);
   if (modes.empty()) { out.set_null(); return; }
   std::string json;
   json.reserve(modes.size() * 8 + 2);
@@ -446,8 +446,8 @@ static void skew_clear(SkewState &s) { s = SkewState{}; }
 static void skew_accumulate(SkewState &s, RealArg v) {
   if (v.is_null() || std::isnan(v.value())) return;
   if (s.n == 0) s.ref = v.value();
-  double x = v.value() - s.ref;
-  double x2 = x * x;
+  const double x = v.value() - s.ref;
+  const double x2 = x * x;
   s.n++;
   s.sum += x;
   s.sum_sq += x2;
@@ -458,10 +458,10 @@ static void skew_accumulate(SkewState &s, RealArg v) {
 // Uses the expanded-moment identities to avoid storing individual values.
 static void stats_skewness_result(const SkewState &s, RealResult out) try {
   if (s.n < 2) { out.set_null(); return; }
-  double mean = s.sum / static_cast<double>(s.n);
-  double m2 = s.sum_sq / static_cast<double>(s.n) - mean * mean;
+  const double mean = s.sum / static_cast<double>(s.n);
+  const double m2 = s.sum_sq / static_cast<double>(s.n) - mean * mean;
   if (m2 <= 0.0) { out.set_null(); return; }
-  double m3 = s.sum_cu / static_cast<double>(s.n)
+  const double m3 = s.sum_cu / static_cast<double>(s.n)
               - 3.0 * mean * s.sum_sq / static_cast<double>(s.n)
               + 2.0 * mean * mean * mean;
   out.set(m3 / std::pow(m2, 1.5));
@@ -470,13 +470,13 @@ static void stats_skewness_result(const SkewState &s, RealResult out) try {
 // Pearson's median skewness: 3 × (mean − median) / population_stddev.
 // Requires value storage for median; reuses StatsState/stats_accumulate.
 static void stats_skewness_pearson_result(const StatsState &s, RealResult out) try {
-  size_t n = s.values.size();
+  const size_t n = s.values.size();
   if (n < 2) { out.set_null(); return; }
-  double mean = std::accumulate(s.values.begin(), s.values.end(), 0.0) / static_cast<double>(n);
+  const double mean = std::accumulate(s.values.begin(), s.values.end(), 0.0) / static_cast<double>(n);
   double variance = 0.0;
-  for (double v : s.values) variance += (v - mean) * (v - mean);
+  for (const double v : s.values) variance += (v - mean) * (v - mean);
   variance /= static_cast<double>(n);
-  double stddev = std::sqrt(variance);
+  const double stddev = std::sqrt(variance);
   if (stddev == 0.0) { out.set_null(); return; }
   std::sort(s.values.begin(), s.values.end());
   out.set(3.0 * (mean - range_median(s.values, 0, n)) / stddev);
@@ -591,11 +591,11 @@ static double gammacf(double a, double x) {
   double d = 1.0 / b;
   double h = d;
   for (int i = 1; i <= max_iter; i++) {
-    double an = -static_cast<double>(i) * (static_cast<double>(i) - a);
+    const double an = -static_cast<double>(i) * (static_cast<double>(i) - a);
     b += 2.0;
     d = an * d + b; if (std::fabs(d) < tiny) d = tiny; d = 1.0 / d;
     c = b + an / c; if (std::fabs(c) < tiny) c = tiny;
-    double del = d * c;
+    const double del = d * c;
     h *= del;
     if (std::fabs(del - 1.0) < eps) break;
   }
@@ -620,11 +620,11 @@ static void chisq_gof_clear(ChiSqGofState &s) { s = ChiSqGofState{}; }
 // Shared cell accumulation: (O-E)²/E; skips rows where E is NULL, zero, or negative.
 static void chisq_accumulate_cell(double &chi_sq, size_t &k, RealArg observed, RealArg expected) {
   if (observed.is_null() || expected.is_null()) return;
-  double obs = observed.value();
-  double e = expected.value();
+  const double obs = observed.value();
+  const double e = expected.value();
   if (std::isnan(obs) || std::isnan(e)) return;
   if (!(e > 0.0)) return;
-  double diff = obs - e;
+  const double diff = obs - e;
   chi_sq += (diff * diff) / e;
   k++;
 }
@@ -646,7 +646,7 @@ static void stats_chisq_gof_df_result(const ChiSqGofState &s, RealResult out) tr
 // P(χ²_{k-1} > stat); returns NULL when df = 0 (k = 1).
 static void stats_chisq_gof_p_result(const ChiSqGofState &s, RealResult out) try {
   if (s.k == 0 || s.k == 1) { out.set_null(); return; }
-  double df = static_cast<double>(s.k - 1);
+  const double df = static_cast<double>(s.k - 1);
   out.set(gammaq(df / 2.0, s.chi_sq / 2.0));
 } catch (...) { out.error("STATS_CHISQ_GOF_P: unexpected error"); }
 
@@ -688,7 +688,7 @@ static void stats_chisq_indep_result(const ChiSqGofState &s, RealResult out) try
 static void stats_chisq_indep_p_result(const ChiSqIndepState &s, RealResult out) try {
   if (s.k == 0) { out.set_null(); return; }
   if (!(s.n_rows > 0.0) || !(s.n_cols > 0.0)) { out.set_null(); return; }
-  double df = (std::floor(s.n_rows) - 1.0) * (std::floor(s.n_cols) - 1.0);
+  const double df = (std::floor(s.n_rows) - 1.0) * (std::floor(s.n_cols) - 1.0);
   if (!(df > 0.0)) { out.set_null(); return; }
   out.set(gammaq(df / 2.0, s.chi_sq / 2.0));
 } catch (...) { out.error("STATS_CHISQ_INDEP_P: unexpected error"); }
@@ -724,8 +724,8 @@ static void kurt_clear(KurtState &s) { s = KurtState{}; }
 static void kurt_accumulate(KurtState &s, RealArg v) {
   if (v.is_null() || std::isnan(v.value())) return;
   if (s.n == 0) s.ref = v.value();
-  double d = v.value() - s.ref;
-  double d2 = d * d;
+  const double d = v.value() - s.ref;
+  const double d2 = d * d;
   s.n++;
   s.sum1 += d;
   s.sum2 += d2;
@@ -800,7 +800,7 @@ static void cov_accumulate(CovState &s, RealArg x, RealArg y) {
   const double yv = y.value();
   if (std::isnan(xv) || std::isnan(yv)) return;
   s.n++;
-  double dx = xv - s.mean_x;
+  const double dx = xv - s.mean_x;
   s.mean_x += dx / static_cast<double>(s.n);
   s.mean_y += (yv - s.mean_y) / static_cast<double>(s.n);
   s.C += dx * (yv - s.mean_y);  // uses updated mean_y — Welford's co-moment form
@@ -847,11 +847,11 @@ static void mean_trim_accumulate(MeanTrimState &s, RealArg v, RealArg trim_pct) 
 
 static void stats_mean_trimmed_result(const MeanTrimState &s, RealResult out) try {
   if (s.values.empty()) { out.set_null(); return; }
-  double p = s.trim_pct;
+  const double p = s.trim_pct;
   if (std::isnan(p) || p < 0.0 || p >= 0.5) { out.set_null(); return; }
   std::sort(s.values.begin(), s.values.end());
-  size_t n = s.values.size();
-  size_t k = static_cast<size_t>(std::floor(p * static_cast<double>(n)));
+  const size_t n = s.values.size();
+  const size_t k = static_cast<size_t>(std::floor(p * static_cast<double>(n)));
   if (2 * k >= n) { out.set_null(); return; }
   double sum = 0.0;
   for (size_t i = k; i < n - k; ++i) sum += s.values[i];
@@ -860,14 +860,14 @@ static void stats_mean_trimmed_result(const MeanTrimState &s, RealResult out) tr
 
 static void stats_mean_winsorized_result(const MeanTrimState &s, RealResult out) try {
   if (s.values.empty()) { out.set_null(); return; }
-  double p = s.trim_pct;
+  const double p = s.trim_pct;
   if (std::isnan(p) || p < 0.0 || p >= 0.5) { out.set_null(); return; }
   std::sort(s.values.begin(), s.values.end());
-  size_t n = s.values.size();
-  size_t k = static_cast<size_t>(std::floor(p * static_cast<double>(n)));
+  const size_t n = s.values.size();
+  const size_t k = static_cast<size_t>(std::floor(p * static_cast<double>(n)));
   if (2 * k >= n) { out.set_null(); return; }
-  double lo = s.values[k];
-  double hi = s.values[n - 1 - k];
+  const double lo = s.values[k];
+  const double hi = s.values[n - 1 - k];
   double sum = static_cast<double>(k) * lo;
   for (size_t i = k; i < n - k; ++i) sum += s.values[i];
   sum += static_cast<double>(k) * hi;
@@ -894,7 +894,7 @@ static void mean_geo_clear(MeanGeoState &s) { s = MeanGeoState{}; }
 
 static void mean_geo_accumulate(MeanGeoState &s, RealArg v) {
   if (v.is_null() || std::isnan(v.value())) return;
-  double x = v.value();
+  const double x = v.value();
   if (!(x > 0.0)) return;
   s.n++;
   s.sum_log += std::log(x);
@@ -924,7 +924,7 @@ static void mean_harm_clear(MeanHarmState &s) { s = MeanHarmState{}; }
 
 static void mean_harm_accumulate(MeanHarmState &s, RealArg v) {
   if (v.is_null() || std::isnan(v.value())) return;
-  double x = v.value();
+  const double x = v.value();
   if (!(x > 0.0)) return;
   s.n++;
   s.sum_recip += 1.0 / x;
