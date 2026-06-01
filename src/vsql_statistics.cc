@@ -35,7 +35,7 @@ using vsql::StringResult;
 // =============================================================================
 
 struct StatsState {
-  std::vector<double> values;
+  mutable std::vector<double> values;
 };
 
 static void stats_clear(StatsState &s) {
@@ -43,7 +43,7 @@ static void stats_clear(StatsState &s) {
 }
 
 static void stats_accumulate(StatsState &s, RealArg v) {
-  if (!v.is_null()) s.values.push_back(v.value());
+  if (!v.is_null() && !std::isnan(v.value())) s.values.push_back(v.value());
 }
 
 // Median of a sorted sub-range [lo, hi).
@@ -56,56 +56,54 @@ static double range_median(const std::vector<double> &v, size_t lo, size_t hi) {
 
 // Sorts values and computes Q1, Q3 using Tukey's hinges (exclusive median).
 // Returns false if the group is empty (all-NULL input).
-static bool compute_quartiles(const std::vector<double> &vals_in, double &q1, double &q3) {
-  if (vals_in.empty()) return false;
-  std::vector<double> vals(vals_in);
-  std::sort(vals.begin(), vals.end());
-  size_t n = vals.size();
+static bool compute_quartiles(const StatsState &s, double &q1, double &q3) {
+  if (s.values.empty()) return false;
+  std::sort(s.values.begin(), s.values.end());
+  size_t n = s.values.size();
   if (n == 1) {
-    q1 = q3 = vals[0];
+    q1 = q3 = s.values[0];
     return true;
   }
   size_t lower_end = n / 2;
   size_t upper_start = (n % 2 == 1) ? lower_end + 1 : lower_end;
-  q1 = range_median(vals, 0, lower_end);
-  q3 = range_median(vals, upper_start, n);
+  q1 = range_median(s.values, 0, lower_end);
+  q3 = range_median(s.values, upper_start, n);
   return true;
 }
 
 static void stats_iqr_result(const StatsState &s, RealResult out) try {
   double q1, q3;
-  if (!compute_quartiles(s.values, q1, q3)) { out.set_null(); return; }
+  if (!compute_quartiles(s, q1, q3)) { out.set_null(); return; }
   out.set(q3 - q1);
 } catch (...) { out.error("STATS_IQR: unexpected error"); }
 
 static void stats_q1_result(const StatsState &s, RealResult out) try {
   double q1, q3;
-  if (!compute_quartiles(s.values, q1, q3)) { out.set_null(); return; }
+  if (!compute_quartiles(s, q1, q3)) { out.set_null(); return; }
   out.set(q1);
 } catch (...) { out.error("STATS_Q1: unexpected error"); }
 
 static void stats_q3_result(const StatsState &s, RealResult out) try {
   double q1, q3;
-  if (!compute_quartiles(s.values, q1, q3)) { out.set_null(); return; }
+  if (!compute_quartiles(s, q1, q3)) { out.set_null(); return; }
   out.set(q3);
 } catch (...) { out.error("STATS_Q3: unexpected error"); }
 
 static void stats_median_result(const StatsState &s, RealResult out) try {
   if (s.values.empty()) { out.set_null(); return; }
-  auto vals = s.values;
-  std::sort(vals.begin(), vals.end());
-  out.set(range_median(vals, 0, vals.size()));
+  std::sort(s.values.begin(), s.values.end());
+  out.set(range_median(s.values, 0, s.values.size()));
 } catch (...) { out.error("STATS_MEDIAN: unexpected error"); }
 
 static void stats_iqr_lower_fence_result(const StatsState &s, RealResult out) try {
   double q1, q3;
-  if (!compute_quartiles(s.values, q1, q3)) { out.set_null(); return; }
+  if (!compute_quartiles(s, q1, q3)) { out.set_null(); return; }
   out.set(q1 - 1.5 * (q3 - q1));
 } catch (...) { out.error("STATS_IQR_LOWER_FENCE: unexpected error"); }
 
 static void stats_iqr_upper_fence_result(const StatsState &s, RealResult out) try {
   double q1, q3;
-  if (!compute_quartiles(s.values, q1, q3)) { out.set_null(); return; }
+  if (!compute_quartiles(s, q1, q3)) { out.set_null(); return; }
   out.set(q3 + 1.5 * (q3 - q1));
 } catch (...) { out.error("STATS_IQR_UPPER_FENCE: unexpected error"); }
 
@@ -137,16 +135,18 @@ static void ttest_clear(TTestState &s) {
 // group == 1.0 → group1, group == 2.0 → group2; other values are ignored.
 static void ttest_accumulate(TTestState &s, RealArg value, RealArg group) {
   if (value.is_null() || group.is_null()) return;
+  double v = value.value();
   double g = group.value();
-  if (g == 1.0)      s.group1.push_back(value.value());
-  else if (g == 2.0) s.group2.push_back(value.value());
+  if (std::isnan(v) || std::isnan(g)) return;
+  if (g == 1.0)      s.group1.push_back(v);
+  else if (g == 2.0) s.group2.push_back(v);
 }
 
 // Accumulate for 3-parameter functions (value, group, alpha).
 static void ttest_crit_accumulate(TTestState &s, RealArg value, RealArg group,
                                    RealArg alpha) {
   ttest_accumulate(s, value, group);
-  if (!alpha.is_null()) s.alpha = alpha.value();
+  if (!alpha.is_null() && !std::isnan(alpha.value())) s.alpha = alpha.value();
 }
 
 // Continued fraction core for the regularized incomplete beta function.
@@ -203,7 +203,12 @@ static double t_two_tail_p(double t, double df) {
 // One-tail critical value: largest t > 0 such that P(T_df > t) >= alpha.
 // Uses bisection on t_two_tail_p; 200 iterations gives ~12 significant figures.
 static double t_critical(double alpha, double df) {
-  double lo = 0.0, hi = 1000.0;
+  double lo = 0.0;
+  double hi = 10.0;
+  while (t_two_tail_p(hi, df) / 2.0 > alpha && hi < 1e10) {
+    lo = hi;
+    hi *= 2.0;
+  }
   for (int i = 0; i < 200; i++) {
     double mid = (lo + hi) / 2.0;
     if (t_two_tail_p(mid, df) / 2.0 > alpha) lo = mid;
@@ -282,6 +287,7 @@ static void ttest_p_two_tail_result(const TTestState &s, RealResult out) try {
 static void ttest_t_crit_one_tail_result(const TTestState &s, RealResult out) try {
   TTestResult r;
   if (!compute_ttest(s, r)) { out.set_null(); return; }
+  if (std::isnan(s.alpha) || s.alpha <= 0.0 || s.alpha >= 1.0) { out.set_null(); return; }
   out.set(t_critical(s.alpha, r.df));
 } catch (...) { out.error("STATS_TTEST_T_CRIT_ONE_TAIL: unexpected error"); }
 
@@ -289,7 +295,9 @@ static void ttest_t_crit_one_tail_result(const TTestState &s, RealResult out) tr
 static void ttest_t_crit_two_tail_result(const TTestState &s, RealResult out) try {
   TTestResult r;
   if (!compute_ttest(s, r)) { out.set_null(); return; }
-  out.set(t_critical(s.alpha / 2.0, r.df));
+  double alpha_two = s.alpha / 2.0;
+  if (std::isnan(alpha_two) || alpha_two <= 0.0 || alpha_two >= 0.5) { out.set_null(); return; }
+  out.set(t_critical(alpha_two, r.df));
 } catch (...) { out.error("STATS_TTEST_T_CRIT_TWO_TAIL: unexpected error"); }
 
 template<auto ResultFn>
@@ -369,21 +377,33 @@ static void stats_mode_result(const ModeState &s, StringResult out) try {
 static void stats_mode_min_result(const ModeState &s, RealResult out) try {
   if (s.freq.empty()) { out.set_null(); return; }
   size_t max_freq = 0;
-  for (const auto &kv : s.freq) if (kv.second > max_freq) max_freq = kv.second;
+  double min_val = std::numeric_limits<double>::infinity();
+  for (const auto &kv : s.freq) {
+    if (kv.second > max_freq) {
+      max_freq = kv.second;
+      min_val = kv.first;
+    } else if (kv.second == max_freq) {
+      min_val = std::min(min_val, kv.first);
+    }
+  }
   if (max_freq <= 1) { out.set_null(); return; }
-  double result = std::numeric_limits<double>::infinity();
-  for (const auto &kv : s.freq) if (kv.second == max_freq) result = std::min(result, kv.first);
-  out.set(result);
+  out.set(min_val);
 } catch (...) { out.error("STATS_MODE_MIN: unexpected error"); }
 
 static void stats_mode_max_result(const ModeState &s, RealResult out) try {
   if (s.freq.empty()) { out.set_null(); return; }
   size_t max_freq = 0;
-  for (const auto &kv : s.freq) if (kv.second > max_freq) max_freq = kv.second;
+  double max_val = -std::numeric_limits<double>::infinity();
+  for (const auto &kv : s.freq) {
+    if (kv.second > max_freq) {
+      max_freq = kv.second;
+      max_val = kv.first;
+    } else if (kv.second == max_freq) {
+      max_val = std::max(max_val, kv.first);
+    }
+  }
   if (max_freq <= 1) { out.set_null(); return; }
-  double result = -std::numeric_limits<double>::infinity();
-  for (const auto &kv : s.freq) if (kv.second == max_freq) result = std::max(result, kv.first);
-  out.set(result);
+  out.set(max_val);
 } catch (...) { out.error("STATS_MODE_MAX: unexpected error"); }
 
 template<auto ResultFn>
@@ -421,7 +441,7 @@ struct SkewState {
 static void skew_clear(SkewState &s) { s = SkewState{}; }
 
 static void skew_accumulate(SkewState &s, RealArg v) {
-  if (v.is_null()) return;
+  if (v.is_null() || std::isnan(v.value())) return;
   if (s.n == 0) s.ref = v.value();
   double x = v.value() - s.ref;
   double x2 = x * x;
@@ -455,9 +475,8 @@ static void stats_skewness_pearson_result(const StatsState &s, RealResult out) t
   variance /= (double)n;
   double stddev = std::sqrt(variance);
   if (stddev == 0.0) { out.set_null(); return; }
-  auto vals = s.values;
-  std::sort(vals.begin(), vals.end());
-  out.set(3.0 * (mean - range_median(vals, 0, n)) / stddev);
+  std::sort(s.values.begin(), s.values.end());
+  out.set(3.0 * (mean - range_median(s.values, 0, n)) / stddev);
 } catch (...) { out.error("STATS_SKEWNESS_PEARSON: unexpected error"); }
 
 template<auto ResultFn>
@@ -484,16 +503,16 @@ struct ZTestState {
 static void ztest_clear(ZTestState &s) { s = ZTestState{}; }
 
 static void ztest_accumulate(ZTestState &s, RealArg value, RealArg mu, RealArg sigma) {
-  if (!mu.is_null())    s.mu    = mu.value();
-  if (!sigma.is_null()) s.sigma = sigma.value();
-  if (value.is_null()) return;
+  if (!mu.is_null() && !std::isnan(mu.value()))    s.mu    = mu.value();
+  if (!sigma.is_null() && !std::isnan(sigma.value())) s.sigma = sigma.value();
+  if (value.is_null() || std::isnan(value.value())) return;
   s.n++;
   s.sum += value.value();
 }
 
 // Returns NULL when sigma was never set (0.0), is non-positive, or NaN.
 static bool compute_ztest(const ZTestState &s, double &z) {
-  if (s.n == 0 || !(s.sigma > 0.0)) return false;
+  if (s.n == 0 || !(s.sigma > 0.0) || std::isnan(s.sigma) || std::isnan(s.mu)) return false;
   double mean = s.sum / (double)s.n;
   z = (mean - s.mu) / (s.sigma / std::sqrt((double)s.n));
   return true;
@@ -599,9 +618,11 @@ static void chisq_gof_clear(ChiSqGofState &s) { s = ChiSqGofState{}; }
 // Shared cell accumulation: (O-E)²/E; skips rows where E is NULL, zero, or negative.
 static void chisq_accumulate_cell(double &chi_sq, size_t &k, RealArg observed, RealArg expected) {
   if (observed.is_null() || expected.is_null()) return;
+  double obs = observed.value();
   double e = expected.value();
+  if (std::isnan(obs) || std::isnan(e)) return;
   if (!(e > 0.0)) return;
-  double diff = observed.value() - e;
+  double diff = obs - e;
   chi_sq += (diff * diff) / e;
   k++;
 }
@@ -649,8 +670,8 @@ static void chisq_indep_clear(ChiSqIndepState &s) { s = ChiSqIndepState{}; }
 
 static void chisq_indep_accumulate(ChiSqIndepState &s, RealArg observed,
                                    RealArg expected, RealArg n_rows, RealArg n_cols) {
-  if (!n_rows.is_null()) s.n_rows = n_rows.value();
-  if (!n_cols.is_null()) s.n_cols = n_cols.value();
+  if (!n_rows.is_null() && !std::isnan(n_rows.value())) s.n_rows = n_rows.value();
+  if (!n_cols.is_null() && !std::isnan(n_cols.value())) s.n_cols = n_cols.value();
   chisq_accumulate_cell(s.chi_sq, s.k, observed, expected);
 }
 
@@ -699,7 +720,7 @@ struct KurtState {
 static void kurt_clear(KurtState &s) { s = KurtState{}; }
 
 static void kurt_accumulate(KurtState &s, RealArg v) {
-  if (v.is_null()) return;
+  if (v.is_null() || std::isnan(v.value())) return;
   if (s.n == 0) s.ref = v.value();
   double d = v.value() - s.ref;
   double d2 = d * d;
@@ -771,6 +792,7 @@ static void cov_clear(CovState &s) { s = CovState{}; }
 static void cov_accumulate(CovState &s, RealArg x, RealArg y) {
   if (x.is_null() || y.is_null()) return;
   double xv = x.value(), yv = y.value();
+  if (std::isnan(xv) || std::isnan(yv)) return;
   s.n++;
   double dx = xv - s.mean_x;
   s.mean_x += dx / (double)s.n;
@@ -806,44 +828,42 @@ static constexpr auto make_cov_func(const char *name) {
 // =============================================================================
 
 struct MeanTrimState {
-  std::vector<double> values;
+  mutable std::vector<double> values;
   double trim_pct = 0.0; // fraction to trim/winsorize from each end (last non-null wins)
 };
 
 static void mean_trim_clear(MeanTrimState &s) { s = MeanTrimState{}; }
 
 static void mean_trim_accumulate(MeanTrimState &s, RealArg v, RealArg trim_pct) {
-  if (!trim_pct.is_null()) s.trim_pct = trim_pct.value();
-  if (!v.is_null()) s.values.push_back(v.value());
+  if (!trim_pct.is_null() && !std::isnan(trim_pct.value())) s.trim_pct = trim_pct.value();
+  if (!v.is_null() && !std::isnan(v.value())) s.values.push_back(v.value());
 }
 
 static void stats_mean_trimmed_result(const MeanTrimState &s, RealResult out) try {
   if (s.values.empty()) { out.set_null(); return; }
   double p = s.trim_pct;
-  if (!(p >= 0.0)) { out.set_null(); return; }
-  auto vals = s.values;
-  std::sort(vals.begin(), vals.end());
-  size_t n = vals.size();
+  if (std::isnan(p) || p < 0.0 || p >= 0.5) { out.set_null(); return; }
+  std::sort(s.values.begin(), s.values.end());
+  size_t n = s.values.size();
   size_t k = (size_t)std::floor(p * (double)n);
   if (2 * k >= n) { out.set_null(); return; }
   double sum = 0.0;
-  for (size_t i = k; i < n - k; ++i) sum += vals[i];
+  for (size_t i = k; i < n - k; ++i) sum += s.values[i];
   out.set(sum / (double)(n - 2 * k));
 } catch (...) { out.error("STATS_MEAN_TRIMMED: unexpected error"); }
 
 static void stats_mean_winsorized_result(const MeanTrimState &s, RealResult out) try {
   if (s.values.empty()) { out.set_null(); return; }
   double p = s.trim_pct;
-  if (!(p >= 0.0)) { out.set_null(); return; }
-  auto vals = s.values;
-  std::sort(vals.begin(), vals.end());
-  size_t n = vals.size();
+  if (std::isnan(p) || p < 0.0 || p >= 0.5) { out.set_null(); return; }
+  std::sort(s.values.begin(), s.values.end());
+  size_t n = s.values.size();
   size_t k = (size_t)std::floor(p * (double)n);
   if (2 * k >= n) { out.set_null(); return; }
-  double lo = vals[k];
-  double hi = vals[n - 1 - k];
+  double lo = s.values[k];
+  double hi = s.values[n - 1 - k];
   double sum = (double)k * lo;
-  for (size_t i = k; i < n - k; ++i) sum += vals[i];
+  for (size_t i = k; i < n - k; ++i) sum += s.values[i];
   sum += (double)k * hi;
   out.set(sum / (double)n);
 } catch (...) { out.error("STATS_MEAN_WINSORIZED: unexpected error"); }
@@ -867,7 +887,7 @@ struct MeanGeoState {
 static void mean_geo_clear(MeanGeoState &s) { s = MeanGeoState{}; }
 
 static void mean_geo_accumulate(MeanGeoState &s, RealArg v) {
-  if (v.is_null()) return;
+  if (v.is_null() || std::isnan(v.value())) return;
   double x = v.value();
   if (!(x > 0.0)) return;
   s.n++;
@@ -897,7 +917,7 @@ struct MeanHarmState {
 static void mean_harm_clear(MeanHarmState &s) { s = MeanHarmState{}; }
 
 static void mean_harm_accumulate(MeanHarmState &s, RealArg v) {
-  if (v.is_null()) return;
+  if (v.is_null() || std::isnan(v.value())) return;
   double x = v.value();
   if (!(x > 0.0)) return;
   s.n++;

@@ -1,0 +1,20 @@
+INSTALL EXTENSION vsql_statistics;
+CREATE DATABASE IF NOT EXISTS vsql_test;
+USE vsql_test;
+CREATE TABLE t_trim (val DOUBLE);
+INSERT INTO t_trim VALUES (10.0), (20.0), (30.0), (40.0);
+SELECT STATS_MEAN_TRIMMED(val, 0.5) AS trim_50, STATS_MEAN_WINSORIZED(val, 0.6) AS wins_60 FROM t_trim;
+trim_50	wins_60
+NULL	NULL
+DROP TABLE t_trim;
+CREATE TABLE t_ttest (val DOUBLE, grp INT);
+INSERT INTO t_ttest VALUES (10.0, 1), (12.0, 1), (50.0, 2), (52.0, 2);
+SELECT STATS_TTEST_T_CRIT_ONE_TAIL(val, grp, 1e-6) > 0 AS crit_val_exists FROM t_ttest;
+crit_val_exists
+1
+SELECT STATS_TTEST_T_CRIT_ONE_TAIL(val, grp, -0.05) AS crit_neg, STATS_TTEST_T_CRIT_ONE_TAIL(val, grp, 1.05) AS crit_large FROM t_ttest;
+crit_neg	crit_large
+NULL	NULL
+DROP TABLE t_ttest;
+DROP DATABASE vsql_test;
+UNINSTALL EXTENSION vsql_statistics;
