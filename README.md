@@ -1,8 +1,8 @@
 # VillageSQL Statistics Extension
 
-> **Beta notice:** All functions in this extension (`STATS_IQR`, `STATS_TTEST_*`, `STATS_MODE`, `STATS_SKEWNESS`, `STATS_ZTEST_*`, `STATS_CHISQ_*`, `STATS_MEAN_*`) are beta quality. They are functionally correct on the tested datasets but have not been validated at production scale. Use with caution in high-volume or precision-critical workloads and report any anomalies.
+> **Beta notice:** All functions in this extension (`STATS_IQR`, `STATS_TTEST_*`, `STATS_MODE`, `STATS_SKEWNESS`, `STATS_ZTEST_*`, `STATS_CHISQ_*`, `STATS_KURTOSIS*`, `STATS_COVARIANCE_*`, `STATS_MEAN_*`, `STATS_ANOVA_*`) are beta quality. They are functionally correct on the tested datasets but have not been validated at production scale. Use with caution in high-volume or precision-critical workloads and report any anomalies.
 
-Statistical aggregate functions for data scientists — IQR, quartiles, outlier detection, two-sample t-tests, one-sample z-tests, mode, skewness, chi-squared tests, and robust/ratio means.
+Statistical aggregate functions for data scientists — IQR, quartiles, outlier detection, two-sample t-tests, one-sample z-tests, mode, skewness, kurtosis, covariance, chi-squared tests, robust/ratio means, and one-way ANOVA.
 
 ## Installing
 
@@ -82,6 +82,14 @@ SELECT
   STATS_CHISQ_INDEP(observed, expected)              AS chi_sq,
   STATS_CHISQ_INDEP_P(observed, expected, 2.0, 3.0)  AS p_value
 FROM contingency_table;
+
+-- One-way ANOVA: do three or more groups have the same population mean?
+SELECT
+  STATS_ANOVA_F(score, treatment_group)  AS f_stat,
+  STATS_ANOVA_P(score, treatment_group)  AS p_value,
+  STATS_ANOVA_SSB(score, treatment_group) AS ss_between,
+  STATS_ANOVA_SSW(score, treatment_group) AS ss_within
+FROM clinical_trial;
 ```
 
 ## Function Reference
@@ -248,6 +256,34 @@ All chi-squared functions:
 - Return NULL when no valid (observed, expected) pairs exist
 - Return NULL for `STATS_CHISQ_GOF_P` and `STATS_CHISQ_INDEP_P` when df ≤ 0
 - Work with `GROUP BY`, computing the statistic independently per group
+
+### One-Way ANOVA Family
+
+Tests whether three or more independent groups share the same population mean by partitioning total variance into between-group (treatment) and within-group (error) components.
+
+All functions accept `(value, group)` where the group column identifies which group each row belongs to (any distinct numeric value).
+
+| Function | Returns | Description |
+|---|---|---|
+| `STATS_ANOVA_F(value, group)` | `DOUBLE` | F-statistic: MSB / MSW |
+| `STATS_ANOVA_P(value, group)` | `DOUBLE` | P-value: P(F_{dfB,dfW} > F) |
+| `STATS_ANOVA_SSB(value, group)` | `DOUBLE` | Between-group sum of squares |
+| `STATS_ANOVA_SSW(value, group)` | `DOUBLE` | Within-group sum of squares (error) |
+| `STATS_ANOVA_SST(value, group)` | `DOUBLE` | Total sum of squares (SSB + SSW) |
+| `STATS_ANOVA_MSB(value, group)` | `DOUBLE` | Mean square between: SSB / (k − 1) |
+| `STATS_ANOVA_MSW(value, group)` | `DOUBLE` | Mean square within: SSW / (N − k) |
+| `STATS_ANOVA_DFB(value, group)` | `DOUBLE` | Between-group degrees of freedom: k − 1 |
+| `STATS_ANOVA_DFW(value, group)` | `DOUBLE` | Within-group degrees of freedom: N − k |
+
+All ANOVA functions:
+- Use Welford's online algorithm for numerically stable within-group variance (O(1) memory per group)
+- Skip NULL values in the `value` or `group` column
+- Return NULL when fewer than 2 distinct groups are present
+- Return NULL when any group has fewer than 2 non-NULL observations
+- Return NULL when within-group variance is zero (MSW = 0)
+- Work with `GROUP BY`, computing an independent ANOVA per partition
+
+The spec requires k ≥ 3 groups for a valid one-way ANOVA. k = 2 is mathematically equivalent to a t-test — use `STATS_TTEST_T` for two-group comparisons.
 
 ### Skewness Family
 
