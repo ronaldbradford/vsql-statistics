@@ -15,6 +15,7 @@ This file provides guidance to AI coding assistants when working with code in th
 - **Z-test family (3 functions):** `STATS_ZTEST_Z`, `STATS_ZTEST_P_ONE_TAIL`, `STATS_ZTEST_P_TWO_TAIL`
 - **Chi-squared family (5 functions):** `STATS_CHISQ_GOF`, `STATS_CHISQ_GOF_DF`, `STATS_CHISQ_GOF_P`, `STATS_CHISQ_INDEP`, `STATS_CHISQ_INDEP_P`
 - **Kurtosis family (2 functions):** `STATS_KURTOSIS`, `STATS_KURTOSIS_EXCESS`
+- **Covariance family (2 functions):** `STATS_COVARIANCE_POP`, `STATS_COVARIANCE_SAMP`
 - **Means family — beta (4 functions):** `STATS_MEAN_TRIMMED`, `STATS_MEAN_WINSORIZED`, `STATS_MEAN_GEOMETRIC`, `STATS_MEAN_HARMONIC`
 
 All functions operate on `DOUBLE` columns and are usable with `GROUP BY`, mirroring statistical primitives found in Python (numpy/scipy) and R.
@@ -58,6 +59,8 @@ The means family (4 functions — beta) uses three states. `MeanTrimState` (vect
 
 The chi-squared family (5 functions) uses two states. `ChiSqGofState` (chi_sq, k) serves the three GoF functions and also `STATS_CHISQ_INDEP` (same formula, no n_rows/n_cols needed). `ChiSqIndepState` (chi_sq, k, n_rows, n_cols) serves `STATS_CHISQ_INDEP_P`, which accepts the number of rows and columns as constant parameters per row. The p-value is the regularized upper incomplete gamma Q(df/2, χ²/2); computed via series expansion (x < a+1) or Lentz's continued fraction (x ≥ a+1). Rows where expected ≤ 0 are skipped. All five functions return NULL when no valid (O, E) pairs exist.
 
+The covariance family (2 functions) uses `CovState` — a streaming accumulator of n, mean_x, mean_y, and C (Welford's co-moment). Each row passes two REAL arguments (x, y); a row is skipped if either is NULL (concurrent-pair discard). `STATS_COVARIANCE_POP` returns C/n (0.0 for n=1, NULL for n=0). `STATS_COVARIANCE_SAMP` returns C/(n−1) (NULL for n < 2).
+
 **Quartile algorithm:** Tukey's hinges (exclusive median). For a sorted vector of n values:
 - Lower half: indices [0, n/2)
 - Upper half: indices [n/2+1, n) for odd n, [n/2, n) for even n
@@ -68,7 +71,7 @@ The chi-squared family (5 functions) uses two states. `ChiSqGofState` (chi_sq, k
 **Function registration:** `make_aggregate_func<StatsState, &result_fn>(name).returns(REAL).param(REAL).clear<&stats_clear>().accumulate<&stats_accumulate>().build()`
 
 **Key files:**
-- `src/vsql_statistics.cc` — all 32 aggregate functions (6 IQR + 7 t-test + 3 mode + 2 skewness + 3 z-test + 5 chi-squared + 2 kurtosis + 4 means)
+- `src/vsql_statistics.cc` — all 34 aggregate functions (6 IQR + 7 t-test + 3 mode + 2 skewness + 3 z-test + 5 chi-squared + 2 kurtosis + 2 covariance + 4 means)
 - `manifest.json` — extension metadata
 - `CMakeLists.txt` — build configuration
 - `cmake/FindVillageSQL.cmake` — SDK discovery

@@ -170,6 +170,25 @@ Both kurtosis functions:
 
 Interpretation of excess kurtosis: zero = normal (mesokurtic); positive = heavy-tailed (leptokurtic); negative = light-tailed (platykurtic).
 
+### Covariance Family
+
+Both functions accept `(x, y)` — one row per paired observation.
+
+| Function | Returns | Description |
+|---|---|---|
+| `STATS_COVARIANCE_POP(x, y)` | `DOUBLE` | Population covariance σ_xy = Σ(xi−μx)(yi−μy) / N |
+| `STATS_COVARIANCE_SAMP(x, y)` | `DOUBLE` | Sample covariance s_xy = Σ(xi−x̄)(yi−ȳ) / (n−1) (Bessel-corrected) |
+
+Both functions:
+- Use Welford's single-pass streaming algorithm — O(1) memory, numerically stable
+- Skip rows where either `x` or `y` is NULL (concurrent-pair discard)
+- Return NULL when all pairs are NULL
+- Work with `GROUP BY`
+
+`STATS_COVARIANCE_POP` requires N ≥ 1 and returns 0.0 for a single pair. `STATS_COVARIANCE_SAMP` requires n ≥ 2 and returns NULL otherwise.
+
+Interpretation: positive covariance means x and y increase together; negative means they move in opposite directions; zero indicates no linear relationship.
+
 ### Means Family *(beta)*
 
 > These functions are beta quality — see the notice at the top of this document.

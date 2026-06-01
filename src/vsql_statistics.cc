@@ -754,6 +754,54 @@ static constexpr auto make_kurt_func(const char *name) {
 }
 
 // =============================================================================
+// Covariance family
+// =============================================================================
+
+// Welford's online algorithm for co-moments; skips any row where either
+// argument is NULL (concurrent-pair discard per spec).
+struct CovState {
+  size_t n = 0;
+  double mean_x = 0.0;
+  double mean_y = 0.0;
+  double C = 0.0;  // running co-moment: converges to Σ(xi−x̄)(yi−ȳ)
+};
+
+static void cov_clear(CovState &s) { s = CovState{}; }
+
+static void cov_accumulate(CovState &s, RealArg x, RealArg y) {
+  if (x.is_null() || y.is_null()) return;
+  double xv = x.value(), yv = y.value();
+  s.n++;
+  double dx = xv - s.mean_x;
+  s.mean_x += dx / (double)s.n;
+  s.mean_y += (yv - s.mean_y) / (double)s.n;
+  s.C += dx * (yv - s.mean_y);  // uses updated mean_y — Welford's co-moment form
+}
+
+// Population covariance σ_xy = C/n. N=1 yields 0.0; N=0 yields NULL.
+static void stats_cov_pop_result(const CovState &s, RealResult out) try {
+  if (s.n == 0) { out.set_null(); return; }
+  out.set(s.C / (double)s.n);
+} catch (...) { out.error("STATS_COVARIANCE_POP: unexpected error"); }
+
+// Sample covariance s_xy = C/(n−1). Returns NULL for n < 2.
+static void stats_cov_samp_result(const CovState &s, RealResult out) try {
+  if (s.n < 2) { out.set_null(); return; }
+  out.set(s.C / (double)(s.n - 1));
+} catch (...) { out.error("STATS_COVARIANCE_SAMP: unexpected error"); }
+
+template<auto ResultFn>
+static constexpr auto make_cov_func(const char *name) {
+  return vsql::make_aggregate_func<CovState, ResultFn>(name)
+    .returns(vsql::REAL)
+    .param(vsql::REAL)
+    .param(vsql::REAL)
+    .template clear<&cov_clear>()
+    .template accumulate<&cov_accumulate>()
+    .build();
+}
+
+// =============================================================================
 // Means family (trimmed, Winsorized, geometric, harmonic)
 // =============================================================================
 
@@ -905,6 +953,8 @@ VEF_GENERATE_ENTRY_POINTS(
     .func(make_chisq_indep_func<&stats_chisq_indep_p_result>("STATS_CHISQ_INDEP_P"))
     .func(make_kurt_func<&stats_kurtosis_result>("STATS_KURTOSIS"))
     .func(make_kurt_func<&stats_kurtosis_excess_result>("STATS_KURTOSIS_EXCESS"))
+    .func(make_cov_func<&stats_cov_pop_result>("STATS_COVARIANCE_POP"))
+    .func(make_cov_func<&stats_cov_samp_result>("STATS_COVARIANCE_SAMP"))
     .func(make_mean_trim_func<&stats_mean_trimmed_result>("STATS_MEAN_TRIMMED"))
     .func(make_mean_trim_func<&stats_mean_winsorized_result>("STATS_MEAN_WINSORIZED"))
     .func(make_mean_geo_func<&stats_mean_geometric_result>("STATS_MEAN_GEOMETRIC"))
