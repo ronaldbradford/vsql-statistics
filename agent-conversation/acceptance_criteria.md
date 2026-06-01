@@ -77,3 +77,29 @@ Note: INT columns require CAST(col AS DOUBLE). All criteria use CAST(val AS DOUB
 40. Given an all-NULL group, STATS_SKEWNESS_PEARSON(col) must return NULL.
 41. Given a single-row group, STATS_SKEWNESS_PEARSON(CAST(val AS DOUBLE)) must return NULL.
 42. STATS_SKEWNESS_PEARSON must work correctly with GROUP BY.
+
+## Z-Test Functions (session 5)
+
+43. Given 40 observations all equal to 511.0775 with mu=500, sigma=40, STATS_ZTEST_Z must return approximately 1.7515 (ROUND to 4 places).
+44. Given the same dataset, STATS_ZTEST_P_TWO_TAIL must return approximately 0.0799 (ROUND to 4 places).
+45. Given the same dataset, STATS_ZTEST_P_ONE_TAIL must return approximately 0.0399 (ROUND to 4 places).
+46. Given an all-NULL group, all three z-test functions must return NULL.
+47. Given sigma=0, all three z-test functions must return NULL.
+48. Given sigma that was never set (all-NULL sigma column), all three z-test functions must return NULL.
+49. Given a single non-NULL row with mu=500, sigma=40, STATS_ZTEST_Z must return a valid Z-score.
+50. All three z-test functions must work with GROUP BY.
+51. Given a dataset with sample mean below mu (z<0), STATS_ZTEST_P_ONE_TAIL must return a value greater than 0.5.
+52. STATS_ZTEST_P_TWO_TAIL must always be in (0, 1) for non-degenerate inputs (n≥1, sigma>0).
+
+## Chi-Squared Family (session 6)
+
+53. Given the bakery dataset (O=[35,20,15,30], E=[25,25,25,25] as rows), STATS_CHISQ_GOF(observed, expected) must return 10.0.
+54. Given the same bakery dataset, STATS_CHISQ_GOF_DF(observed, expected) must return 3 (k-1=4-1).
+55. Given the same bakery dataset, STATS_CHISQ_GOF_P(observed, expected) must return a value less than 0.05 (approximately 0.0186).
+56. Given observed=expected for all categories, STATS_CHISQ_GOF(observed, expected) must return 0.0.
+57. Given an all-NULL group, all five chi-squared functions must return NULL.
+58. Given a single category (k=1), STATS_CHISQ_GOF_DF must return 0 and STATS_CHISQ_GOF_P must return NULL (df=0 is degenerate).
+59. Given the independence table (O=[60,40,20,80], E=[40,60,40,60] as four rows), STATS_CHISQ_INDEP(observed, expected) must return approximately 33.33.
+60. Given the same independence data, STATS_CHISQ_INDEP_P(observed, expected, 2.0, 2.0) must return a value less than 0.05.
+61. Rows where expected <= 0 must be skipped; remaining rows still contribute to the statistic.
+62. All GoF functions must work with GROUP BY, computing the chi-squared statistic independently per group.

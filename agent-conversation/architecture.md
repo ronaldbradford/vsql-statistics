@@ -89,3 +89,24 @@
     VEF_GENERATE_ENTRY_POINTS extended with 7 new .func() calls
 - Group indicator convention: 1.0 = group 1, 2.0 = group 2; other values silently ignored
 - preview_apis: none used
+
+## Chi-Squared Family (session 6)
+
+sdk_dir: /Users/rbradfor/.villagesql/villagesql-extension-sdk-0.0.4
+session_version: 0.0.4
+preview_apis: none
+
+### Function Names
+- STATS_CHISQ_GOF(observed REAL, expected REAL) → REAL  — GoF χ² stat
+- STATS_CHISQ_GOF_DF(observed REAL, expected REAL) → REAL  — df = k-1
+- STATS_CHISQ_GOF_P(observed REAL, expected REAL) → REAL  — p-value, df=k-1
+- STATS_CHISQ_INDEP(observed REAL, expected REAL) → REAL  — independence χ² stat
+- STATS_CHISQ_INDEP_P(observed REAL, expected REAL, n_rows REAL, n_cols REAL) → REAL  — p-value, df=(r-1)(c-1)
+
+### States
+- ChiSqGofState: double chi_sq=0; size_t k=0  — 2-param accumulate, skip rows where E<=0 or NULL
+- ChiSqIndepState: double chi_sq=0; double n_rows=0; double n_cols=0  — 4-param accumulate
+
+### P-value
+P(χ²_df > x) = Q(df/2, x/2) via regularized upper incomplete gamma Q(a,x).
+Series for x < a+1; continued fraction for x >= a+1. Returns NULL when df<=0.
