@@ -109,3 +109,47 @@
 - E6 (shift accumulator by first value for numerical stability): APPLIED — `ref` field added; centering eliminates catastrophic cancellation for large/offset inputs (e.g., salary data)
 - E7 (n<2 redundant with m2 guard): REJECTED — cheap fast-path; harmless
 - E8 (range_median bound): REJECTED — hi is exclusive per existing implementation; call `range_median(vals, 0, n)` is correct
+
+## Z-Test Simplification (session 5)
+
+### Agent 1: Reuse & AI-Slop — 2 findings applied, 3 rejected
+
+- F1 (one-tail formula semantics): APPLIED (documentation) — added comment clarifying P_ONE_TAIL returns upper-tail P(Z>z) per spec; formula is correct per spec, no change.
+- F2 (NaN sigma passthrough): APPLIED — changed `s.sigma <= 0.0` to `!(s.sigma > 0.0)` to reject NaN sigma.
+- F3 (struct comment "last-value-wins per row"): APPLIED — updated to "last non-null wins".
+- F4 (extract sqrt(2.0) constant): REJECTED — compiler constant-folds std::sqrt(2.0) at -O2; called once per group, not per row.
+- F6 (comment at line 494 restates code): APPLIED — replaced formula comment with "why NULL for non-positive sigma".
+
+### Agent 2: Quality — 3 findings applied, 2 rejected
+
+- F1 (mu/sigma updates before value null-check): REJECTED — intentional; matches ttest_crit_accumulate pattern where constant params update regardless of value nullness.
+- F2 (uninitialized double z): APPLIED — initialized to 0.0 in all three result functions.
+- F3 (sigma default 1.0 → 0.0): APPLIED — default changed to 0.0 so all-null sigma returns NULL via existing sigma<=0 guard.
+- F4 (add param comments in make_ztest_func): REJECTED — project convention uses accumulate function signature + section header; no param comments elsewhere in file.
+- F5 (one-tail formula): Duplicate of A1-F1.
+
+### Agent 3: Efficiency — 1 finding applied, 2 rejected
+
+- F1 (all-null sigma uses sentinel): APPLIED — same fix as A2-F3.
+- F2 (one-tail p-value directional): Duplicate of A1-F1.
+- F4 (NaN sigma passthrough): Duplicate of A1-F2.
+
+## Chi-Squared Simplification (session 6)
+
+Three simplification agents reviewed the chi-squared implementation after first build.
+
+### Applied
+
+- `gamma_prefix` helper extracted — removes duplication of `exp(-x + a*log(x) - lgamma(a))` from both `gammap_series` and `gammacf`.
+- `chisq_accumulate_cell` helper extracted — removes duplication of the (O-E)²/E accumulation logic between `chisq_gof_accumulate` and `chisq_indep_accumulate`.
+- Guard order in `stats_chisq_indep_p_result` fixed — check `!(n_rows > 0) || !(n_cols > 0)` before computing df, preventing NaN passthrough when n_rows or n_cols is NaN.
+- `ChiSqIndepState::k` field added — returns NULL when all-NULL inputs are passed with non-null n_rows/n_cols (previously returned Q(0.5, 0.0)=1 instead of NULL).
+
+### Rejected
+
+- Type mismatch: `stats_chisq_indep_result` using `ChiSqGofState` flagged as bug by all three agents — REJECTED. Intentional design: `STATS_CHISQ_INDEP` is a 2-param aggregate (same formula as GoF); registered via `make_chisq_gof_func`. The separate `ChiSqIndepState` is only needed for `STATS_CHISQ_INDEP_P` which takes 4 params.
+- C-style casts `(double)i` → `static_cast<double>` — REJECTED. Consistent with existing style throughout the file (betacf, ttest, etc.).
+- Clear function indirection (lambda vs direct) — REJECTED. Consistent with all other families in the file.
+- n_rows/n_cols accumulated even when observed/expected null — REJECTED. Intentional; matches ztest_accumulate pattern where constants update regardless of value nullness.
+- `gammap_series` a=0 guard — REJECTED. `a` is always df/2 with df≥2 when called, so a≥1.
+- `gammacf` convergence NaN guard — REJECTED. Standard Lentz TINY guard handles near-zero; no observed non-convergence in tests.
