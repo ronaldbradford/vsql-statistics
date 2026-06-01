@@ -55,6 +55,12 @@ SELECT
   STATS_ZTEST_P_TWO_TAIL(measurement, 500.0, 40.0)   AS p_value
 FROM quality_checks;
 
+-- Kurtosis: measure tail heaviness of a distribution
+SELECT
+  STATS_KURTOSIS(return_pct)        AS pop_kurtosis,
+  STATS_KURTOSIS_EXCESS(return_pct) AS excess_kurtosis
+FROM asset_returns;
+
 -- Trimmed mean: reduce outlier influence by discarding extremes
 SELECT STATS_MEAN_TRIMMED(sale_amount, 0.1) AS robust_mean FROM daily_sales;
 
@@ -146,6 +152,23 @@ All z-test functions:
 - Work with `GROUP BY`
 
 `STATS_ZTEST_P_ONE_TAIL` returns the upper-tail probability P(Z > z). When the sample mean is below μ (z < 0), this returns a value > 0.5 — indicating evidence against the upper-tail alternative. Use `STATS_ZTEST_P_TWO_TAIL` when you are testing for any deviation from μ rather than a directional hypothesis.
+
+### Kurtosis Family
+
+| Function | Returns | Description |
+|---|---|---|
+| `STATS_KURTOSIS(col)` | `DOUBLE` | Population kurtosis β₂ = μ₄/σ⁴ (normal distribution = 3) |
+| `STATS_KURTOSIS_EXCESS(col)` | `DOUBLE` | Fisher-Pearson sample excess kurtosis g₂ = β₂ − 3 (unbiased; normal distribution = 0) |
+
+Both kurtosis functions:
+- Use a streaming accumulator — O(1) memory regardless of group size
+- Skip NULL values; return NULL for an all-NULL group
+- Return NULL when all values are equal (zero variance)
+- Work with `GROUP BY`
+
+`STATS_KURTOSIS` requires n ≥ 2. `STATS_KURTOSIS_EXCESS` requires n ≥ 4 (the unbiased correction factor has (n−2)(n−3) in the denominator).
+
+Interpretation of excess kurtosis: zero = normal (mesokurtic); positive = heavy-tailed (leptokurtic); negative = light-tailed (platykurtic).
 
 ### Means Family *(beta)*
 

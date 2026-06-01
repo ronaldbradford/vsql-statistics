@@ -684,6 +684,76 @@ static constexpr auto make_chisq_indep_func(const char *name) {
 }
 
 // =============================================================================
+// Kurtosis family
+// =============================================================================
+
+struct KurtState {
+  size_t n = 0;
+  double ref = 0.0;   // first observed value; centering reduces floating-point cancellation
+  double sum1 = 0.0;  // Σ(xi - ref)
+  double sum2 = 0.0;  // Σ(xi - ref)²
+  double sum3 = 0.0;  // Σ(xi - ref)³
+  double sum4 = 0.0;  // Σ(xi - ref)⁴
+};
+
+static void kurt_clear(KurtState &s) { s = KurtState{}; }
+
+static void kurt_accumulate(KurtState &s, RealArg v) {
+  if (v.is_null()) return;
+  if (s.n == 0) s.ref = v.value();
+  double d = v.value() - s.ref;
+  double d2 = d * d;
+  s.n++;
+  s.sum1 += d;
+  s.sum2 += d2;
+  s.sum3 += d2 * d;
+  s.sum4 += d2 * d2;
+}
+
+// Derives Σ(xi−mean)² and Σ(xi−mean)⁴ from the shifted accumulators.
+// Returns false when fewer than 2 values or all values are equal (zero variance).
+static bool compute_kurt_moments(const KurtState &s, double &ssq2, double &ssq4) {
+  double c  = s.sum1 / (double)s.n;
+  double c2 = c * c;
+  double n  = (double)s.n;
+  ssq2 = s.sum2 - n * c2;
+  ssq4 = s.sum4 - 4.0*c*s.sum3 + 6.0*c2*s.sum2 - 3.0*n*c2*c2;
+  return ssq2 > 0.0;
+}
+
+// Population kurtosis β₂ = μ₄/m₂² where μ₄ = Σ(xi−μ)⁴/n, m₂ = Σ(xi−μ)²/n.
+// Returns NULL for n < 2 or zero variance.
+static void stats_kurtosis_result(const KurtState &s, RealResult out) try {
+  if (s.n < 2) { out.set_null(); return; }
+  double ssq2, ssq4;
+  if (!compute_kurt_moments(s, ssq2, ssq4)) { out.set_null(); return; }
+  out.set(ssq4 * (double)s.n / (ssq2 * ssq2));
+} catch (...) { out.error("STATS_KURTOSIS: unexpected error"); }
+
+// Fisher-Pearson sample excess kurtosis g₂ (unbiased estimator):
+// g₂ = [n(n+1)/((n−1)(n−2)(n−3))] × Σ[(xi−x̄)⁴/s⁴] − [3(n−1)²/((n−2)(n−3))]
+// Equivalently: g₂ = (n−1)/((n−2)(n−3)) × [n(n+1)·Σ(xi−x̄)⁴/Σ(xi−x̄)² − 3(n−1)]
+// Returns NULL for n < 4 or zero variance.
+static void stats_kurtosis_excess_result(const KurtState &s, RealResult out) try {
+  if (s.n < 4) { out.set_null(); return; }
+  double ssq2, ssq4;
+  if (!compute_kurt_moments(s, ssq2, ssq4)) { out.set_null(); return; }
+  double n  = (double)s.n;
+  double a  = (n - 1.0) / ((n - 2.0) * (n - 3.0));
+  out.set(a * (n * (n + 1.0) * ssq4 / (ssq2 * ssq2) - 3.0 * (n - 1.0)));
+} catch (...) { out.error("STATS_KURTOSIS_EXCESS: unexpected error"); }
+
+template<auto ResultFn>
+static constexpr auto make_kurt_func(const char *name) {
+  return vsql::make_aggregate_func<KurtState, ResultFn>(name)
+    .returns(vsql::REAL)
+    .param(vsql::REAL)
+    .template clear<&kurt_clear>()
+    .template accumulate<&kurt_accumulate>()
+    .build();
+}
+
+// =============================================================================
 // Means family (trimmed, Winsorized, geometric, harmonic)
 // =============================================================================
 
@@ -833,6 +903,8 @@ VEF_GENERATE_ENTRY_POINTS(
     .func(make_chisq_gof_func<&stats_chisq_gof_p_result>("STATS_CHISQ_GOF_P"))
     .func(make_chisq_gof_func<&stats_chisq_indep_result>("STATS_CHISQ_INDEP"))
     .func(make_chisq_indep_func<&stats_chisq_indep_p_result>("STATS_CHISQ_INDEP_P"))
+    .func(make_kurt_func<&stats_kurtosis_result>("STATS_KURTOSIS"))
+    .func(make_kurt_func<&stats_kurtosis_excess_result>("STATS_KURTOSIS_EXCESS"))
     .func(make_mean_trim_func<&stats_mean_trimmed_result>("STATS_MEAN_TRIMMED"))
     .func(make_mean_trim_func<&stats_mean_winsorized_result>("STATS_MEAN_WINSORIZED"))
     .func(make_mean_geo_func<&stats_mean_geometric_result>("STATS_MEAN_GEOMETRIC"))
