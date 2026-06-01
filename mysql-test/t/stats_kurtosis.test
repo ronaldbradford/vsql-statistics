@@ -6,8 +6,6 @@ USE vsql_test;
 # --- Spec worked example: X={10,12,15,18,20}, n=5 ---
 # Population kurtosis β₂ = Σ(xi-μ)⁴/n / (Σ(xi-μ)²/n)² = 7060/4624 ≈ 1.5268
 # Sample excess kurtosis g₂ ≈ -1.8927 (platykurtic — thin-tailed)
-# Note: the PDF states g₂ ≈ -1.21 but that is an arithmetic error in the worked example;
-# the formula on the same page yields -1.8927.
 CREATE TABLE kurt_data (val DOUBLE);
 INSERT INTO kurt_data VALUES (10),(12),(15),(18),(20);
 SELECT ROUND(STATS_KURTOSIS(val), 4)        AS pop_kurtosis   FROM kurt_data;
