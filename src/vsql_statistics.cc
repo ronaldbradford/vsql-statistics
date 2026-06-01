@@ -684,6 +684,124 @@ static constexpr auto make_chisq_indep_func(const char *name) {
 }
 
 // =============================================================================
+// Means family (trimmed, Winsorized, geometric, harmonic)
+// =============================================================================
+
+struct MeanTrimState {
+  std::vector<double> values;
+  double trim_pct = 0.0; // fraction to trim/winsorize from each end (last non-null wins)
+};
+
+static void mean_trim_clear(MeanTrimState &s) { s = MeanTrimState{}; }
+
+static void mean_trim_accumulate(MeanTrimState &s, RealArg v, RealArg trim_pct) {
+  if (!trim_pct.is_null()) s.trim_pct = trim_pct.value();
+  if (!v.is_null()) s.values.push_back(v.value());
+}
+
+static void stats_mean_trimmed_result(const MeanTrimState &s, RealResult out) try {
+  if (s.values.empty()) { out.set_null(); return; }
+  double p = s.trim_pct;
+  if (!(p >= 0.0)) { out.set_null(); return; }
+  auto vals = s.values;
+  std::sort(vals.begin(), vals.end());
+  size_t n = vals.size();
+  size_t k = (size_t)std::floor(p * (double)n);
+  if (2 * k >= n) { out.set_null(); return; }
+  double sum = 0.0;
+  for (size_t i = k; i < n - k; ++i) sum += vals[i];
+  out.set(sum / (double)(n - 2 * k));
+} catch (...) { out.error("STATS_MEAN_TRIMMED: unexpected error"); }
+
+static void stats_mean_winsorized_result(const MeanTrimState &s, RealResult out) try {
+  if (s.values.empty()) { out.set_null(); return; }
+  double p = s.trim_pct;
+  if (!(p >= 0.0)) { out.set_null(); return; }
+  auto vals = s.values;
+  std::sort(vals.begin(), vals.end());
+  size_t n = vals.size();
+  size_t k = (size_t)std::floor(p * (double)n);
+  if (2 * k >= n) { out.set_null(); return; }
+  double lo = vals[k];
+  double hi = vals[n - 1 - k];
+  double sum = (double)k * lo;
+  for (size_t i = k; i < n - k; ++i) sum += vals[i];
+  sum += (double)k * hi;
+  out.set(sum / (double)n);
+} catch (...) { out.error("STATS_MEAN_WINSORIZED: unexpected error"); }
+
+template<auto ResultFn>
+static constexpr auto make_mean_trim_func(const char *name) {
+  return vsql::make_aggregate_func<MeanTrimState, ResultFn>(name)
+    .returns(vsql::REAL)
+    .param(vsql::REAL)
+    .param(vsql::REAL)
+    .template clear<&mean_trim_clear>()
+    .template accumulate<&mean_trim_accumulate>()
+    .build();
+}
+
+struct MeanGeoState {
+  size_t n = 0;
+  double sum_log = 0.0; // Σ ln(xi) for positive values only
+};
+
+static void mean_geo_clear(MeanGeoState &s) { s = MeanGeoState{}; }
+
+static void mean_geo_accumulate(MeanGeoState &s, RealArg v) {
+  if (v.is_null()) return;
+  double x = v.value();
+  if (!(x > 0.0)) return;
+  s.n++;
+  s.sum_log += std::log(x);
+}
+
+static void stats_mean_geometric_result(const MeanGeoState &s, RealResult out) try {
+  if (s.n == 0) { out.set_null(); return; }
+  out.set(std::exp(s.sum_log / (double)s.n));
+} catch (...) { out.error("STATS_MEAN_GEOMETRIC: unexpected error"); }
+
+template<auto ResultFn>
+static constexpr auto make_mean_geo_func(const char *name) {
+  return vsql::make_aggregate_func<MeanGeoState, ResultFn>(name)
+    .returns(vsql::REAL)
+    .param(vsql::REAL)
+    .template clear<&mean_geo_clear>()
+    .template accumulate<&mean_geo_accumulate>()
+    .build();
+}
+
+struct MeanHarmState {
+  size_t n = 0;
+  double sum_recip = 0.0; // Σ(1/xi) for positive values only
+};
+
+static void mean_harm_clear(MeanHarmState &s) { s = MeanHarmState{}; }
+
+static void mean_harm_accumulate(MeanHarmState &s, RealArg v) {
+  if (v.is_null()) return;
+  double x = v.value();
+  if (!(x > 0.0)) return;
+  s.n++;
+  s.sum_recip += 1.0 / x;
+}
+
+static void stats_mean_harmonic_result(const MeanHarmState &s, RealResult out) try {
+  if (s.n == 0) { out.set_null(); return; }
+  out.set((double)s.n / s.sum_recip);
+} catch (...) { out.error("STATS_MEAN_HARMONIC: unexpected error"); }
+
+template<auto ResultFn>
+static constexpr auto make_mean_harm_func(const char *name) {
+  return vsql::make_aggregate_func<MeanHarmState, ResultFn>(name)
+    .returns(vsql::REAL)
+    .param(vsql::REAL)
+    .template clear<&mean_harm_clear>()
+    .template accumulate<&mean_harm_accumulate>()
+    .build();
+}
+
+// =============================================================================
 // Registration
 // =============================================================================
 
@@ -715,4 +833,8 @@ VEF_GENERATE_ENTRY_POINTS(
     .func(make_chisq_gof_func<&stats_chisq_gof_p_result>("STATS_CHISQ_GOF_P"))
     .func(make_chisq_gof_func<&stats_chisq_indep_result>("STATS_CHISQ_INDEP"))
     .func(make_chisq_indep_func<&stats_chisq_indep_p_result>("STATS_CHISQ_INDEP_P"))
+    .func(make_mean_trim_func<&stats_mean_trimmed_result>("STATS_MEAN_TRIMMED"))
+    .func(make_mean_trim_func<&stats_mean_winsorized_result>("STATS_MEAN_WINSORIZED"))
+    .func(make_mean_geo_func<&stats_mean_geometric_result>("STATS_MEAN_GEOMETRIC"))
+    .func(make_mean_harm_func<&stats_mean_harmonic_result>("STATS_MEAN_HARMONIC"))
 )

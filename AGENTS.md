@@ -14,6 +14,7 @@ This file provides guidance to AI coding assistants when working with code in th
 - **Skewness family (2 functions):** `STATS_SKEWNESS`, `STATS_SKEWNESS_PEARSON`
 - **Z-test family (3 functions):** `STATS_ZTEST_Z`, `STATS_ZTEST_P_ONE_TAIL`, `STATS_ZTEST_P_TWO_TAIL`
 - **Chi-squared family (5 functions):** `STATS_CHISQ_GOF`, `STATS_CHISQ_GOF_DF`, `STATS_CHISQ_GOF_P`, `STATS_CHISQ_INDEP`, `STATS_CHISQ_INDEP_P`
+- **Means family — beta (4 functions):** `STATS_MEAN_TRIMMED`, `STATS_MEAN_WINSORIZED`, `STATS_MEAN_GEOMETRIC`, `STATS_MEAN_HARMONIC`
 
 All functions operate on `DOUBLE` columns and are usable with `GROUP BY`, mirroring statistical primitives found in Python (numpy/scipy) and R.
 
@@ -50,6 +51,8 @@ The skewness family (2 functions) uses two separate states. `STATS_SKEWNESS` use
 
 The z-test family (3 functions) uses `ZTestState` — streaming accumulator of n and Σx, plus stored `mu` and `sigma` constants (last non-null wins per row; sigma defaults to 0.0 so all-null sigma returns NULL). `STATS_ZTEST_P_ONE_TAIL` returns the upper-tail probability P(Z > z), which is > 0.5 when the sample mean is below μ. All three return NULL when n=0, sigma≤0, or sigma is NaN.
 
+The means family (4 functions — beta) uses three states. `MeanTrimState` (vector + trim_pct) serves both `STATS_MEAN_TRIMMED` and `STATS_MEAN_WINSORIZED` (2-param functions). `MeanGeoState` (n, sum_log) is a streaming accumulator for `STATS_MEAN_GEOMETRIC`: accumulates Σln(xi) for positive values, then returns exp(sum_log/n). `MeanHarmState` (n, sum_recip) is a streaming accumulator for `STATS_MEAN_HARMONIC`: accumulates Σ(1/xi) for positive values, then returns n/sum_recip. Non-positive inputs are silently skipped for both geometric and harmonic.
+
 The chi-squared family (5 functions) uses two states. `ChiSqGofState` (chi_sq, k) serves the three GoF functions and also `STATS_CHISQ_INDEP` (same formula, no n_rows/n_cols needed). `ChiSqIndepState` (chi_sq, k, n_rows, n_cols) serves `STATS_CHISQ_INDEP_P`, which accepts the number of rows and columns as constant parameters per row. The p-value is the regularized upper incomplete gamma Q(df/2, χ²/2); computed via series expansion (x < a+1) or Lentz's continued fraction (x ≥ a+1). Rows where expected ≤ 0 are skipped. All five functions return NULL when no valid (O, E) pairs exist.
 
 **Quartile algorithm:** Tukey's hinges (exclusive median). For a sorted vector of n values:
@@ -62,7 +65,7 @@ The chi-squared family (5 functions) uses two states. `ChiSqGofState` (chi_sq, k
 **Function registration:** `make_aggregate_func<StatsState, &result_fn>(name).returns(REAL).param(REAL).clear<&stats_clear>().accumulate<&stats_accumulate>().build()`
 
 **Key files:**
-- `src/vsql_statistics.cc` — all 26 aggregate functions (6 IQR + 7 t-test + 3 mode + 2 skewness + 3 z-test + 5 chi-squared)
+- `src/vsql_statistics.cc` — all 30 aggregate functions (6 IQR + 7 t-test + 3 mode + 2 skewness + 3 z-test + 5 chi-squared + 4 means)
 - `manifest.json` — extension metadata
 - `CMakeLists.txt` — build configuration
 - `cmake/FindVillageSQL.cmake` — SDK discovery

@@ -38,6 +38,7 @@ Commit the updated `.result` file alongside the `.test` file.
 | `stats_skewness.test` | Both skewness functions; symmetric, right-skewed, and left-skewed datasets; all-NULL, single-row, and all-equal-value edge cases; GROUP BY; uses `vsql_test` database |
 | `stats_ztest.test` | All three z-test functions; spec reference example (n=40); hand-verifiable Z=1.0 case; single-row; all-NULL; sigma=0; negative Z one-tail; GROUP BY; uses `vsql_test` database |
 | `stats_chisq.test` | All five chi-squared functions; GoF bakery example (χ²=10, df=3, p≈0.0186); perfect fit; single category (df=0); all-NULL; expected≤0 row skipping; independence table (χ²≈33.33); independence all-NULL; df=0 independence; GROUP BY |
+| `stats_means.test` | All four means functions; spec examples (trimmed=13.8, winsorized=13.86, geometric≈1.1149, harmonic=48.0); trim=0 returns arithmetic mean; all-NULL; degenerate trim (trim_pct≥0.5); non-positive value skipping for geometric and harmonic; GROUP BY |
 
 ## Manual Spot-Check
 

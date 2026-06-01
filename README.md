@@ -1,6 +1,8 @@
 # VillageSQL Statistics Extension
 
-Statistical aggregate functions for data scientists — IQR, quartiles, outlier detection, two-sample t-tests, one-sample z-tests, mode, skewness, and chi-squared tests.
+> **Beta notice:** All functions in this extension (`STATS_IQR`, `STATS_TTEST_*`, `STATS_MODE`, `STATS_SKEWNESS`, `STATS_ZTEST_*`, `STATS_CHISQ_*`, `STATS_MEAN_*`) are beta quality. They are functionally correct on the tested datasets but have not been validated at production scale. Use with caution in high-volume or precision-critical workloads and report any anomalies.
+
+Statistical aggregate functions for data scientists — IQR, quartiles, outlier detection, two-sample t-tests, one-sample z-tests, mode, skewness, chi-squared tests, and robust/ratio means.
 
 ## Installing
 
@@ -52,6 +54,15 @@ SELECT
   STATS_ZTEST_Z(measurement, 500.0, 40.0)            AS z_stat,
   STATS_ZTEST_P_TWO_TAIL(measurement, 500.0, 40.0)   AS p_value
 FROM quality_checks;
+
+-- Trimmed mean: reduce outlier influence by discarding extremes
+SELECT STATS_MEAN_TRIMMED(sale_amount, 0.1) AS robust_mean FROM daily_sales;
+
+-- Geometric mean: average growth rate across periods
+SELECT STATS_MEAN_GEOMETRIC(growth_factor) AS avg_growth FROM quarterly_returns;
+
+-- Harmonic mean: true average for rates and ratios
+SELECT STATS_MEAN_HARMONIC(speed_mph) AS avg_speed FROM journey_legs;
 
 -- Chi-squared goodness of fit: do observed counts match expected proportions?
 SELECT
@@ -135,6 +146,35 @@ All z-test functions:
 - Work with `GROUP BY`
 
 `STATS_ZTEST_P_ONE_TAIL` returns the upper-tail probability P(Z > z). When the sample mean is below μ (z < 0), this returns a value > 0.5 — indicating evidence against the upper-tail alternative. Use `STATS_ZTEST_P_TWO_TAIL` when you are testing for any deviation from μ rather than a directional hypothesis.
+
+### Means Family *(beta)*
+
+> These functions are beta quality — see the notice at the top of this document.
+
+#### Trimmed and Winsorized Means
+
+Both functions accept `(col, trim_pct)` where `trim_pct` is the fraction to remove or replace from each end (e.g., `0.2` for 20%). Pass the same constant on every row.
+
+| Function | Returns | Description |
+|---|---|---|
+| `STATS_MEAN_TRIMMED(col, trim_pct)` | `DOUBLE` | Arithmetic mean after removing the bottom and top `trim_pct` fraction |
+| `STATS_MEAN_WINSORIZED(col, trim_pct)` | `DOUBLE` | Arithmetic mean after replacing extremes with the boundary values |
+
+Both functions:
+- Return NULL for an all-NULL group or when trimming removes all values (trim_pct ≥ 0.5)
+- Work with `GROUP BY`
+
+#### Geometric and Harmonic Means
+
+| Function | Returns | Description |
+|---|---|---|
+| `STATS_MEAN_GEOMETRIC(col)` | `DOUBLE` | nth root of the product of all values; use for growth rates and ratios |
+| `STATS_MEAN_HARMONIC(col)` | `DOUBLE` | n / Σ(1/xᵢ); use for rates such as speed or throughput |
+
+Both functions:
+- Skip non-positive values (log and reciprocal are undefined at zero or below)
+- Return NULL when no positive values exist in the group
+- Work with `GROUP BY`
 
 ### Chi-Squared Family
 
