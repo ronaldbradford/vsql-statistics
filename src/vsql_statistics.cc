@@ -946,6 +946,151 @@ static constexpr auto make_mean_harm_func(const char *name) {
 }
 
 // =============================================================================
+// One-way ANOVA family (One-Way Analysis of Variance)
+// =============================================================================
+
+struct AnovaGroupStats {
+  size_t n = 0;
+  double sum = 0.0;  // Σ yij — used for grand mean and SSB
+  double mean = 0.0; // running mean (Welford)
+  double ss = 0.0;   // Σ(yij − mean)² via Welford's online M2
+};
+
+struct AnovaState {
+  std::unordered_map<double, AnovaGroupStats> groups;
+};
+
+static void anova_clear(AnovaState &s) { s.groups.clear(); }
+
+static void anova_accumulate(AnovaState &s, RealArg value, RealArg group) {
+  if (value.is_null() || group.is_null()) return;
+  const double v = value.value();
+  const double g = group.value();
+  if (std::isnan(v) || std::isnan(g)) return;
+  auto &gs = s.groups[g];
+  gs.n++;
+  gs.sum += v;
+  const double delta = v - gs.mean;
+  gs.mean += delta / static_cast<double>(gs.n);
+  gs.ss += delta * (v - gs.mean);
+}
+
+struct AnovaResult {
+  double ssb;
+  double ssw;
+  double sst;
+  double msb;
+  double msw;
+  double f;
+  double df_b;
+  double df_w;
+};
+
+// Returns nullopt when k < 2, any group has n < 2, or MSW is zero.
+// Spec requires k ≥ 3 for valid one-way ANOVA; k = 2 is mathematically
+// equivalent to a t-test — use STATS_TTEST_T for two-group comparisons.
+static std::optional<AnovaResult> compute_anova(const AnovaState &s) {
+  const size_t k = s.groups.size();
+  if (k < 2) return std::nullopt;
+
+  size_t N = 0;
+  double grand_sum = 0.0;
+  for (const auto &[label, g] : s.groups) {
+    if (g.n < 2) return std::nullopt;
+    N += g.n;
+    grand_sum += g.sum;
+  }
+
+  const double grand_mean = grand_sum / static_cast<double>(N);
+
+  double ssb = 0.0;
+  double ssw = 0.0;
+  for (const auto &[label, g] : s.groups) {
+    const double diff = g.mean - grand_mean;
+    ssb += static_cast<double>(g.n) * diff * diff;
+    ssw += g.ss;
+  }
+
+  const double df_b = static_cast<double>(k - 1);
+  const double df_w = static_cast<double>(N - k);
+  if (!(df_w > 0.0)) return std::nullopt;
+
+  const double msw = ssw / df_w;
+  if (!(msw > 0.0)) return std::nullopt;
+  const double msb = ssb / df_b;
+  const double f   = msb / msw;
+
+  return AnovaResult{ssb, ssw, ssb + ssw, msb, msw, f, df_b, df_w};
+}
+
+static void stats_anova_f_result(const AnovaState &s, RealResult out) try {
+  const auto r = compute_anova(s);
+  if (!r) { out.set_null(); return; }
+  out.set(r->f);
+} catch (...) { out.error("STATS_ANOVA_F: unexpected error"); }
+
+// P(F_{dfB,dfW} > F) = I_{dfW/(dfW + dfB·F)}(dfW/2, dfB/2)
+static void stats_anova_p_result(const AnovaState &s, RealResult out) try {
+  const auto r = compute_anova(s);
+  if (!r) { out.set_null(); return; }
+  const double x = r->df_w / (r->df_w + r->df_b * r->f);
+  out.set(betai(x, r->df_w / 2.0, r->df_b / 2.0));
+} catch (...) { out.error("STATS_ANOVA_P: unexpected error"); }
+
+static void stats_anova_ssb_result(const AnovaState &s, RealResult out) try {
+  const auto r = compute_anova(s);
+  if (!r) { out.set_null(); return; }
+  out.set(r->ssb);
+} catch (...) { out.error("STATS_ANOVA_SSB: unexpected error"); }
+
+static void stats_anova_ssw_result(const AnovaState &s, RealResult out) try {
+  const auto r = compute_anova(s);
+  if (!r) { out.set_null(); return; }
+  out.set(r->ssw);
+} catch (...) { out.error("STATS_ANOVA_SSW: unexpected error"); }
+
+static void stats_anova_sst_result(const AnovaState &s, RealResult out) try {
+  const auto r = compute_anova(s);
+  if (!r) { out.set_null(); return; }
+  out.set(r->sst);
+} catch (...) { out.error("STATS_ANOVA_SST: unexpected error"); }
+
+static void stats_anova_msb_result(const AnovaState &s, RealResult out) try {
+  const auto r = compute_anova(s);
+  if (!r) { out.set_null(); return; }
+  out.set(r->msb);
+} catch (...) { out.error("STATS_ANOVA_MSB: unexpected error"); }
+
+static void stats_anova_msw_result(const AnovaState &s, RealResult out) try {
+  const auto r = compute_anova(s);
+  if (!r) { out.set_null(); return; }
+  out.set(r->msw);
+} catch (...) { out.error("STATS_ANOVA_MSW: unexpected error"); }
+
+static void stats_anova_dfb_result(const AnovaState &s, RealResult out) try {
+  const auto r = compute_anova(s);
+  if (!r) { out.set_null(); return; }
+  out.set(r->df_b);
+} catch (...) { out.error("STATS_ANOVA_DFB: unexpected error"); }
+
+static void stats_anova_dfw_result(const AnovaState &s, RealResult out) try {
+  const auto r = compute_anova(s);
+  if (!r) { out.set_null(); return; }
+  out.set(r->df_w);
+} catch (...) { out.error("STATS_ANOVA_DFW: unexpected error"); }
+
+template<auto ResultFn>
+static constexpr auto make_anova_func(const char *name) {
+  return vsql::make_aggregate_func<AnovaState, ResultFn>(name)
+    .returns(vsql::REAL)
+    .param(vsql::REAL)
+    .param(vsql::REAL)
+    .template clear<&anova_clear>()
+    .template accumulate<&anova_accumulate>()
+    .build();
+}
+
+// =============================================================================
 // Registration
 // =============================================================================
 
@@ -985,4 +1130,13 @@ VEF_GENERATE_ENTRY_POINTS(
     .func(make_mean_trim_func<&stats_mean_winsorized_result>("STATS_MEAN_WINSORIZED"))
     .func(make_mean_geo_func<&stats_mean_geometric_result>("STATS_MEAN_GEOMETRIC"))
     .func(make_mean_harm_func<&stats_mean_harmonic_result>("STATS_MEAN_HARMONIC"))
+    .func(make_anova_func<&stats_anova_f_result>("STATS_ANOVA_F"))
+    .func(make_anova_func<&stats_anova_p_result>("STATS_ANOVA_P"))
+    .func(make_anova_func<&stats_anova_ssb_result>("STATS_ANOVA_SSB"))
+    .func(make_anova_func<&stats_anova_ssw_result>("STATS_ANOVA_SSW"))
+    .func(make_anova_func<&stats_anova_sst_result>("STATS_ANOVA_SST"))
+    .func(make_anova_func<&stats_anova_msb_result>("STATS_ANOVA_MSB"))
+    .func(make_anova_func<&stats_anova_msw_result>("STATS_ANOVA_MSW"))
+    .func(make_anova_func<&stats_anova_dfb_result>("STATS_ANOVA_DFB"))
+    .func(make_anova_func<&stats_anova_dfw_result>("STATS_ANOVA_DFW"))
 )
