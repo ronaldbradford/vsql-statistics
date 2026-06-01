@@ -13,6 +13,7 @@ This file provides guidance to AI coding assistants when working with code in th
 - **Mode family (3 functions):** `STATS_MODE`, `STATS_MODE_MIN`, `STATS_MODE_MAX`
 - **Skewness family (2 functions):** `STATS_SKEWNESS`, `STATS_SKEWNESS_PEARSON`
 - **Z-test family (3 functions):** `STATS_ZTEST_Z`, `STATS_ZTEST_P_ONE_TAIL`, `STATS_ZTEST_P_TWO_TAIL`
+- **Chi-squared family (5 functions):** `STATS_CHISQ_GOF`, `STATS_CHISQ_GOF_DF`, `STATS_CHISQ_GOF_P`, `STATS_CHISQ_INDEP`, `STATS_CHISQ_INDEP_P`
 
 All functions operate on `DOUBLE` columns and are usable with `GROUP BY`, mirroring statistical primitives found in Python (numpy/scipy) and R.
 
@@ -49,6 +50,8 @@ The skewness family (2 functions) uses two separate states. `STATS_SKEWNESS` use
 
 The z-test family (3 functions) uses `ZTestState` — streaming accumulator of n and Σx, plus stored `mu` and `sigma` constants (last non-null wins per row; sigma defaults to 0.0 so all-null sigma returns NULL). `STATS_ZTEST_P_ONE_TAIL` returns the upper-tail probability P(Z > z), which is > 0.5 when the sample mean is below μ. All three return NULL when n=0, sigma≤0, or sigma is NaN.
 
+The chi-squared family (5 functions) uses two states. `ChiSqGofState` (chi_sq, k) serves the three GoF functions and also `STATS_CHISQ_INDEP` (same formula, no n_rows/n_cols needed). `ChiSqIndepState` (chi_sq, k, n_rows, n_cols) serves `STATS_CHISQ_INDEP_P`, which accepts the number of rows and columns as constant parameters per row. The p-value is the regularized upper incomplete gamma Q(df/2, χ²/2); computed via series expansion (x < a+1) or Lentz's continued fraction (x ≥ a+1). Rows where expected ≤ 0 are skipped. All five functions return NULL when no valid (O, E) pairs exist.
+
 **Quartile algorithm:** Tukey's hinges (exclusive median). For a sorted vector of n values:
 - Lower half: indices [0, n/2)
 - Upper half: indices [n/2+1, n) for odd n, [n/2, n) for even n
@@ -59,7 +62,7 @@ The z-test family (3 functions) uses `ZTestState` — streaming accumulator of n
 **Function registration:** `make_aggregate_func<StatsState, &result_fn>(name).returns(REAL).param(REAL).clear<&stats_clear>().accumulate<&stats_accumulate>().build()`
 
 **Key files:**
-- `src/vsql_statistics.cc` — all 21 aggregate functions (6 IQR + 7 t-test + 3 mode + 2 skewness + 3 z-test)
+- `src/vsql_statistics.cc` — all 26 aggregate functions (6 IQR + 7 t-test + 3 mode + 2 skewness + 3 z-test + 5 chi-squared)
 - `manifest.json` — extension metadata
 - `CMakeLists.txt` — build configuration
 - `cmake/FindVillageSQL.cmake` — SDK discovery
@@ -98,6 +101,9 @@ SELECT STATS_SKEWNESS(col) FROM t;
 SELECT STATS_SKEWNESS_PEARSON(col) FROM t;
 SELECT STATS_ZTEST_Z(col, 500.0, 40.0) FROM t;
 SELECT STATS_ZTEST_P_TWO_TAIL(col, 500.0, 40.0) FROM t;
+SELECT STATS_CHISQ_GOF(observed, expected) FROM t;
+SELECT STATS_CHISQ_GOF_P(observed, expected) FROM t;
+SELECT STATS_CHISQ_INDEP_P(observed, expected, 2.0, 3.0) FROM t;
 UNINSTALL EXTENSION vsql_statistics;
 ```
 

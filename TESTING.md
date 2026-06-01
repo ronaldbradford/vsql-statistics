@@ -37,6 +37,7 @@ Commit the updated `.result` file alongside the `.test` file.
 | `stats_mode.test` | All three mode functions; unimodal and bimodal datasets; all-unique and single-row NULL cases; all-NULL column; GROUP BY |
 | `stats_skewness.test` | Both skewness functions; symmetric, right-skewed, and left-skewed datasets; all-NULL, single-row, and all-equal-value edge cases; GROUP BY; uses `vsql_test` database |
 | `stats_ztest.test` | All three z-test functions; spec reference example (n=40); hand-verifiable Z=1.0 case; single-row; all-NULL; sigma=0; negative Z one-tail; GROUP BY; uses `vsql_test` database |
+| `stats_chisq.test` | All five chi-squared functions; GoF bakery example (χ²=10, df=3, p≈0.0186); perfect fit; single category (df=0); all-NULL; expected≤0 row skipping; independence table (χ²≈33.33); independence all-NULL; df=0 independence; GROUP BY |
 
 ## Manual Spot-Check
 
@@ -111,5 +112,25 @@ SELECT ROUND(STATS_ZTEST_P_TWO_TAIL(val, 500.0, 40.0), 4) AS p_two    FROM ztest
 SELECT ROUND(STATS_ZTEST_P_ONE_TAIL(val, 500.0, 40.0), 4) AS p_one    FROM ztest_data;  -- 0.0399
 
 DROP TABLE ztest_data;
+
+-- Chi-squared goodness of fit: bakery cookie sales (4 categories)
+-- O=[35,20,15,30] E=[25,25,25,25] → chi_sq=10, df=3, p≈0.0186
+CREATE TABLE chisq_gof (observed DOUBLE, expected DOUBLE);
+INSERT INTO chisq_gof VALUES (35,25),(20,25),(15,25),(30,25);
+SELECT STATS_CHISQ_GOF(observed, expected)               AS chi_sq;  -- 10
+SELECT STATS_CHISQ_GOF_DF(observed, expected)            AS df;      -- 3
+SELECT ROUND(STATS_CHISQ_GOF_P(observed, expected), 4)  AS p_value; -- 0.0186
+
+DROP TABLE chisq_gof;
+
+-- Chi-squared test of independence: work mode vs department (2x2 table)
+-- chi_sq≈33.33, p < 0.05 (reject independence)
+CREATE TABLE chisq_indep (observed DOUBLE, expected DOUBLE);
+INSERT INTO chisq_indep VALUES (60,40),(40,60),(20,40),(80,60);
+SELECT ROUND(STATS_CHISQ_INDEP(observed, expected), 2)              AS chi_sq;      -- 33.33
+SELECT STATS_CHISQ_INDEP_P(observed, expected, 2.0, 2.0) < 0.05   AS reject_null; -- 1
+
+DROP TABLE chisq_indep;
+
 UNINSTALL EXTENSION vsql_statistics;
 ```

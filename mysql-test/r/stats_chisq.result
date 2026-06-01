@@ -1,0 +1,93 @@
+INSTALL EXTENSION vsql_statistics;
+CREATE DATABASE IF NOT EXISTS vsql_test;
+USE vsql_test;
+CREATE TABLE chisq_gof (observed DOUBLE, expected DOUBLE);
+INSERT INTO chisq_gof VALUES (35,25),(20,25),(15,25),(30,25);
+SELECT STATS_CHISQ_GOF(observed, expected)    AS chi_sq FROM chisq_gof;
+chi_sq
+10
+SELECT STATS_CHISQ_GOF_DF(observed, expected) AS df     FROM chisq_gof;
+df
+3
+SELECT ROUND(STATS_CHISQ_GOF_P(observed, expected), 4) AS p_value FROM chisq_gof;
+p_value
+0.0186
+SELECT STATS_CHISQ_GOF_P(observed, expected) < 0.05 AS reject_null FROM chisq_gof;
+reject_null
+1
+DELETE FROM chisq_gof;
+INSERT INTO chisq_gof VALUES (25,25),(25,25),(25,25),(25,25);
+SELECT STATS_CHISQ_GOF(observed, expected) AS chi_sq FROM chisq_gof;
+chi_sq
+0
+DELETE FROM chisq_gof;
+INSERT INTO chisq_gof VALUES (40,50);
+SELECT STATS_CHISQ_GOF(observed, expected)    AS chi_sq FROM chisq_gof;
+chi_sq
+2
+SELECT STATS_CHISQ_GOF_DF(observed, expected) AS df     FROM chisq_gof;
+df
+0
+SELECT STATS_CHISQ_GOF_P(observed, expected)  AS p_value FROM chisq_gof;
+p_value
+NULL
+DELETE FROM chisq_gof;
+INSERT INTO chisq_gof VALUES (NULL,NULL),(NULL,NULL);
+SELECT STATS_CHISQ_GOF(observed, expected)    AS chi_sq FROM chisq_gof;
+chi_sq
+NULL
+SELECT STATS_CHISQ_GOF_DF(observed, expected) AS df     FROM chisq_gof;
+df
+NULL
+SELECT STATS_CHISQ_GOF_P(observed, expected)  AS p_value FROM chisq_gof;
+p_value
+NULL
+DELETE FROM chisq_gof;
+INSERT INTO chisq_gof VALUES (35,25),(20,0),(15,25),(30,-5);
+SELECT STATS_CHISQ_GOF(observed, expected)    AS chi_sq FROM chisq_gof;
+chi_sq
+8
+SELECT STATS_CHISQ_GOF_DF(observed, expected) AS df     FROM chisq_gof;
+df
+1
+DELETE FROM chisq_gof;
+DROP TABLE chisq_gof;
+CREATE TABLE chisq_indep (observed DOUBLE, expected DOUBLE);
+INSERT INTO chisq_indep VALUES (60,40),(40,60),(20,40),(80,60);
+SELECT ROUND(STATS_CHISQ_INDEP(observed, expected), 2)              AS chi_sq   FROM chisq_indep;
+chi_sq
+33.33
+SELECT STATS_CHISQ_INDEP_P(observed, expected, 2.0, 2.0) < 0.05    AS reject_null FROM chisq_indep;
+reject_null
+1
+DELETE FROM chisq_indep;
+INSERT INTO chisq_indep VALUES (NULL,NULL),(NULL,NULL);
+SELECT STATS_CHISQ_INDEP(observed, expected)             AS chi_sq  FROM chisq_indep;
+chi_sq
+NULL
+SELECT STATS_CHISQ_INDEP_P(observed, expected, 2.0, 2.0) AS p_value FROM chisq_indep;
+p_value
+NULL
+DELETE FROM chisq_indep;
+INSERT INTO chisq_indep VALUES (60,40),(40,60);
+SELECT STATS_CHISQ_INDEP_P(observed, expected, 1.0, 2.0) AS p_null FROM chisq_indep;
+p_null
+NULL
+DELETE FROM chisq_indep;
+DROP TABLE chisq_indep;
+CREATE TABLE vsql_test.chisq_grouped (grp INT, observed DOUBLE, expected DOUBLE);
+INSERT INTO chisq_grouped VALUES
+(1, 35, 25),(1, 20, 25),(1, 15, 25),(1, 30, 25),
+(2, 25, 25),(2, 25, 25),(2, 25, 25),(2, 25, 25);
+SELECT grp,
+STATS_CHISQ_GOF(observed, expected)    AS chi_sq,
+STATS_CHISQ_GOF_DF(observed, expected) AS df
+FROM vsql_test.chisq_grouped
+GROUP BY grp
+ORDER BY grp;
+grp	chi_sq	df
+1	10	3
+2	0	3
+DROP TABLE vsql_test.chisq_grouped;
+DROP DATABASE vsql_test;
+UNINSTALL EXTENSION vsql_statistics;

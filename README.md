@@ -1,6 +1,6 @@
 # VillageSQL Statistics Extension
 
-Statistical aggregate functions for data scientists — IQR, quartiles, outlier detection, two-sample t-tests, one-sample z-tests, mode, and skewness.
+Statistical aggregate functions for data scientists — IQR, quartiles, outlier detection, two-sample t-tests, one-sample z-tests, mode, skewness, and chi-squared tests.
 
 ## Installing
 
@@ -52,6 +52,19 @@ SELECT
   STATS_ZTEST_Z(measurement, 500.0, 40.0)            AS z_stat,
   STATS_ZTEST_P_TWO_TAIL(measurement, 500.0, 40.0)   AS p_value
 FROM quality_checks;
+
+-- Chi-squared goodness of fit: do observed counts match expected proportions?
+SELECT
+  STATS_CHISQ_GOF(observed, expected)    AS chi_sq,
+  STATS_CHISQ_GOF_DF(observed, expected) AS df,
+  STATS_CHISQ_GOF_P(observed, expected)  AS p_value
+FROM category_counts;
+
+-- Chi-squared test of independence: are two categorical variables related?
+SELECT
+  STATS_CHISQ_INDEP(observed, expected)              AS chi_sq,
+  STATS_CHISQ_INDEP_P(observed, expected, 2.0, 3.0)  AS p_value
+FROM contingency_table;
 ```
 
 ## Function Reference
@@ -122,6 +135,37 @@ All z-test functions:
 - Work with `GROUP BY`
 
 `STATS_ZTEST_P_ONE_TAIL` returns the upper-tail probability P(Z > z). When the sample mean is below μ (z < 0), this returns a value > 0.5 — indicating evidence against the upper-tail alternative. Use `STATS_ZTEST_P_TWO_TAIL` when you are testing for any deviation from μ rather than a directional hypothesis.
+
+### Chi-Squared Family
+
+Two families of chi-squared functions share a common formula — χ² = Σ[(O − E)² / E] — applied to rows where expected > 0.
+
+#### Goodness of Fit
+
+Tests whether observed counts match expected proportions across k categories (df = k − 1).
+
+| Function | Returns | Description |
+|---|---|---|
+| `STATS_CHISQ_GOF(observed, expected)` | `DOUBLE` | Chi-squared statistic |
+| `STATS_CHISQ_GOF_DF(observed, expected)` | `DOUBLE` | Degrees of freedom: k − 1 |
+| `STATS_CHISQ_GOF_P(observed, expected)` | `DOUBLE` | P-value: P(χ²_{k-1} > stat) |
+
+#### Test of Independence
+
+Tests whether two categorical variables in a contingency table are independent (df = (r − 1)(c − 1)).
+
+| Function | Returns | Description |
+|---|---|---|
+| `STATS_CHISQ_INDEP(observed, expected)` | `DOUBLE` | Chi-squared statistic |
+| `STATS_CHISQ_INDEP_P(observed, expected, n_rows, n_cols)` | `DOUBLE` | P-value: P(χ²_{(r-1)(c-1)} > stat) |
+
+`n_rows` and `n_cols` are the number of rows and columns in the contingency table — pass them as constants repeated on every row.
+
+All chi-squared functions:
+- Skip rows where `expected` is NULL, zero, or negative
+- Return NULL when no valid (observed, expected) pairs exist
+- Return NULL for `STATS_CHISQ_GOF_P` and `STATS_CHISQ_INDEP_P` when df ≤ 0
+- Work with `GROUP BY`, computing the statistic independently per group
 
 ### Skewness Family
 

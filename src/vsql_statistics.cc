@@ -532,6 +532,158 @@ static constexpr auto make_ztest_func(const char *name) {
 }
 
 // =============================================================================
+// Chi-squared family (Goodness of Fit and Test of Independence)
+// =============================================================================
+
+// Shared log-gamma normalisation factor used by both series and continued fraction.
+static double gamma_prefix(double a, double x) {
+  return std::exp(-x + a * std::log(x) - std::lgamma(a));
+}
+
+// Series expansion of the regularized lower incomplete gamma P(a, x) = γ(a,x)/Γ(a).
+// Converges for x < a+1.
+static double gammap_series(double a, double x) {
+  const int    MAX_ITER = 500;
+  const double EPS      = 1e-12;
+
+  double ap  = a;
+  double del = 1.0 / a;
+  double sum = del;
+  for (int i = 0; i < MAX_ITER; i++) {
+    ap  += 1.0;
+    del *= x / ap;
+    sum += del;
+    if (std::fabs(del) < std::fabs(sum) * EPS) break;
+  }
+  return sum * gamma_prefix(a, x);
+}
+
+// Continued fraction representation of the upper incomplete gamma Q(a, x) = Γ(a,x)/Γ(a).
+// Converges for x >= a+1. Uses Lentz's algorithm.
+static double gammacf(double a, double x) {
+  const int    MAX_ITER = 500;
+  const double TINY     = 1e-30;
+  const double EPS      = 1e-12;
+
+  double b = x + 1.0 - a;
+  double c = 1.0 / TINY;
+  double d = 1.0 / b;
+  double h = d;
+  for (int i = 1; i <= MAX_ITER; i++) {
+    double an = -(double)i * ((double)i - a);
+    b += 2.0;
+    d = an * d + b; if (std::fabs(d) < TINY) d = TINY; d = 1.0 / d;
+    c = b + an / c; if (std::fabs(c) < TINY) c = TINY;
+    double del = d * c;
+    h *= del;
+    if (std::fabs(del - 1.0) < EPS) break;
+  }
+  return gamma_prefix(a, x) * h;
+}
+
+// Regularized upper incomplete gamma Q(a, x) = 1 - P(a, x).
+// P(χ²_df > stat) = Q(df/2, stat/2) — the chi-squared survival function.
+static double gammaq(double a, double x) {
+  if (x <= 0.0) return 1.0;
+  if (x < a + 1.0) return 1.0 - gammap_series(a, x);
+  return gammacf(a, x);
+}
+
+struct ChiSqGofState {
+  double chi_sq = 0.0;
+  size_t k = 0;
+};
+
+static void chisq_gof_clear(ChiSqGofState &s) { s = ChiSqGofState{}; }
+
+// Shared cell accumulation: (O-E)²/E; skips rows where E is NULL, zero, or negative.
+static void chisq_accumulate_cell(double &chi_sq, size_t &k, RealArg observed, RealArg expected) {
+  if (observed.is_null() || expected.is_null()) return;
+  double e = expected.value();
+  if (!(e > 0.0)) return;
+  double diff = observed.value() - e;
+  chi_sq += (diff * diff) / e;
+  k++;
+}
+
+static void chisq_gof_accumulate(ChiSqGofState &s, RealArg observed, RealArg expected) {
+  chisq_accumulate_cell(s.chi_sq, s.k, observed, expected);
+}
+
+static void stats_chisq_gof_result(const ChiSqGofState &s, RealResult out) try {
+  if (s.k == 0) { out.set_null(); return; }
+  out.set(s.chi_sq);
+} catch (...) { out.error("STATS_CHISQ_GOF: unexpected error"); }
+
+static void stats_chisq_gof_df_result(const ChiSqGofState &s, RealResult out) try {
+  if (s.k == 0) { out.set_null(); return; }
+  out.set((double)(s.k - 1));
+} catch (...) { out.error("STATS_CHISQ_GOF_DF: unexpected error"); }
+
+// P(χ²_{k-1} > stat); returns NULL when df = 0 (k = 1).
+static void stats_chisq_gof_p_result(const ChiSqGofState &s, RealResult out) try {
+  if (s.k == 0 || s.k == 1) { out.set_null(); return; }
+  double df = (double)(s.k - 1);
+  out.set(gammaq(df / 2.0, s.chi_sq / 2.0));
+} catch (...) { out.error("STATS_CHISQ_GOF_P: unexpected error"); }
+
+template<auto ResultFn>
+static constexpr auto make_chisq_gof_func(const char *name) {
+  return vsql::make_aggregate_func<ChiSqGofState, ResultFn>(name)
+    .returns(vsql::REAL)
+    .param(vsql::REAL)
+    .param(vsql::REAL)
+    .template clear<&chisq_gof_clear>()
+    .template accumulate<&chisq_gof_accumulate>()
+    .build();
+}
+
+struct ChiSqIndepState {
+  double chi_sq = 0.0;
+  size_t k = 0;        // count of valid (O,E) pairs; 0 → NULL result
+  double n_rows = 0.0; // last non-null; (n_rows-1)*(n_cols-1) gives df
+  double n_cols = 0.0;
+};
+
+static void chisq_indep_clear(ChiSqIndepState &s) { s = ChiSqIndepState{}; }
+
+static void chisq_indep_accumulate(ChiSqIndepState &s, RealArg observed,
+                                   RealArg expected, RealArg n_rows, RealArg n_cols) {
+  if (!n_rows.is_null()) s.n_rows = n_rows.value();
+  if (!n_cols.is_null()) s.n_cols = n_cols.value();
+  chisq_accumulate_cell(s.chi_sq, s.k, observed, expected);
+}
+
+// STATS_CHISQ_INDEP uses ChiSqGofState (same formula as GoF, no n_rows/n_cols needed).
+static void stats_chisq_indep_result(const ChiSqGofState &s, RealResult out) try {
+  if (s.k == 0) { out.set_null(); return; }
+  out.set(s.chi_sq);
+} catch (...) { out.error("STATS_CHISQ_INDEP: unexpected error"); }
+
+// P(χ²_{(r-1)(c-1)} > stat); returns NULL when no valid data, dimensions are
+// non-positive/NaN, or df <= 0.
+static void stats_chisq_indep_p_result(const ChiSqIndepState &s, RealResult out) try {
+  if (s.k == 0) { out.set_null(); return; }
+  if (!(s.n_rows > 0.0) || !(s.n_cols > 0.0)) { out.set_null(); return; }
+  double df = (std::floor(s.n_rows) - 1.0) * (std::floor(s.n_cols) - 1.0);
+  if (!(df > 0.0)) { out.set_null(); return; }
+  out.set(gammaq(df / 2.0, s.chi_sq / 2.0));
+} catch (...) { out.error("STATS_CHISQ_INDEP_P: unexpected error"); }
+
+template<auto ResultFn>
+static constexpr auto make_chisq_indep_func(const char *name) {
+  return vsql::make_aggregate_func<ChiSqIndepState, ResultFn>(name)
+    .returns(vsql::REAL)
+    .param(vsql::REAL)
+    .param(vsql::REAL)
+    .param(vsql::REAL)
+    .param(vsql::REAL)
+    .template clear<&chisq_indep_clear>()
+    .template accumulate<&chisq_indep_accumulate>()
+    .build();
+}
+
+// =============================================================================
 // Registration
 // =============================================================================
 
@@ -558,4 +710,9 @@ VEF_GENERATE_ENTRY_POINTS(
     .func(make_ztest_func<&stats_ztest_z_result>("STATS_ZTEST_Z"))
     .func(make_ztest_func<&stats_ztest_p_one_tail_result>("STATS_ZTEST_P_ONE_TAIL"))
     .func(make_ztest_func<&stats_ztest_p_two_tail_result>("STATS_ZTEST_P_TWO_TAIL"))
+    .func(make_chisq_gof_func<&stats_chisq_gof_result>("STATS_CHISQ_GOF"))
+    .func(make_chisq_gof_func<&stats_chisq_gof_df_result>("STATS_CHISQ_GOF_DF"))
+    .func(make_chisq_gof_func<&stats_chisq_gof_p_result>("STATS_CHISQ_GOF_P"))
+    .func(make_chisq_gof_func<&stats_chisq_indep_result>("STATS_CHISQ_INDEP"))
+    .func(make_chisq_indep_func<&stats_chisq_indep_p_result>("STATS_CHISQ_INDEP_P"))
 )
