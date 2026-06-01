@@ -1,8 +1,25 @@
 # VillageSQL Statistics Extension
 
+Statistical aggregate functions for data scientists — IQR, quartiles, outlier detection, two-sample t-tests, one-sample z-tests, mode, skewness, kurtosis, covariance, chi-squared tests, robust/ratio means, and one-way ANOVA.
+
+## Summary
+
+| Family | Count | Functions |
+|--------|------:|-----------|
+| **IQR** | 6 | `STATS_IQR`, `STATS_Q1`, `STATS_Q3`, `STATS_MEDIAN`, `STATS_IQR_LOWER_FENCE`, `STATS_IQR_UPPER_FENCE` |
+| **T-test** | 7 | `STATS_TTEST_T`, `STATS_TTEST_DF`, `STATS_TTEST_POOLED_VAR`, `STATS_TTEST_P_ONE_TAIL`, `STATS_TTEST_P_TWO_TAIL`, `STATS_TTEST_T_CRIT_ONE_TAIL`, `STATS_TTEST_T_CRIT_TWO_TAIL` |
+| **Mode** | 3 | `STATS_MODE`, `STATS_MODE_MIN`, `STATS_MODE_MAX` |
+| **Skewness** | 2 | `STATS_SKEWNESS`, `STATS_SKEWNESS_PEARSON` |
+| **Z-test** | 3 | `STATS_ZTEST_Z`, `STATS_ZTEST_P_ONE_TAIL`, `STATS_ZTEST_P_TWO_TAIL` |
+| **Chi-squared** | 5 | `STATS_CHISQ_GOF`, `STATS_CHISQ_GOF_DF`, `STATS_CHISQ_GOF_P`, `STATS_CHISQ_INDEP`, `STATS_CHISQ_INDEP_P` |
+| **Kurtosis** | 2 | `STATS_KURTOSIS`, `STATS_KURTOSIS_EXCESS` |
+| **Covariance** | 2 | `STATS_COVARIANCE_POP`, `STATS_COVARIANCE_SAMP` |
+| **Means** | 4 | `STATS_MEAN_TRIMMED`, `STATS_MEAN_WINSORIZED`, `STATS_MEAN_GEOMETRIC`, `STATS_MEAN_HARMONIC` |
+| **ANOVA** | 9 | `STATS_ANOVA_F`, `STATS_ANOVA_P`, `STATS_ANOVA_SSB`, `STATS_ANOVA_SSW`, `STATS_ANOVA_SST`, `STATS_ANOVA_MSB`, `STATS_ANOVA_MSW`, `STATS_ANOVA_DFB`, `STATS_ANOVA_DFW` |
+| **Total** | **43** | |
+
 > **Beta notice:** All functions in this extension (`STATS_IQR`, `STATS_TTEST_*`, `STATS_MODE`, `STATS_SKEWNESS`, `STATS_ZTEST_*`, `STATS_CHISQ_*`, `STATS_KURTOSIS*`, `STATS_COVARIANCE_*`, `STATS_MEAN_*`, `STATS_ANOVA_*`) are beta quality. They are functionally correct on the tested datasets but have not been validated at production scale. Use with caution in high-volume or precision-critical workloads and report any anomalies.
 
-Statistical aggregate functions for data scientists — IQR, quartiles, outlier detection, two-sample t-tests, one-sample z-tests, mode, skewness, kurtosis, covariance, chi-squared tests, robust/ratio means, and one-way ANOVA.
 
 ## Installing
 
