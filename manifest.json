@@ -1,7 +1,7 @@
 {
   "name": "vsql_statistics",
-  "version": "1.0.0",
-  "description": "Statistical aggregate functions for data scientists — IQR, quartiles, and outlier detection",
+  "version": "0.5.0",
+  "description": "Statistical aggregate functions for data scientists. Provides 43 functions across 10 families: IQR and quartiles (Q1, Q3, median, outlier fences), two-sample t-test (pooled variance, p-values, critical values), mode (all modes, min, max), skewness (moment-based and Pearson), one-sample z-test, kurtosis (population and excess), covariance (population and sample), robust and ratio means (trimmed, Winsorized, geometric, harmonic), chi-squared (goodness of fit and test of independence), and one-way ANOVA (F-statistic, p-value, sum of squares, mean squares, degrees of freedom).",
   "author": "Ronald Bradford",
   "license": "GPL-2.0"
 }
