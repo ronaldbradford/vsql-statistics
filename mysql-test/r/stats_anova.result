@@ -15,7 +15,7 @@ f
 18
 SELECT STATS_ANOVA_P(value, grp)   AS p    FROM anova_spec;
 p
-0.00024414062499999984
+0.00024414062500000027
 SELECT STATS_ANOVA_SSB(value, grp) AS ssb  FROM anova_spec;
 ssb
 90
