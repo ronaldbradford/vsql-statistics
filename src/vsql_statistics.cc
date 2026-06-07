@@ -257,67 +257,60 @@ static std::optional<TTestResult> compute_ttest(const TTestState &s) {
   return TTestResult{t, df, pooled_var};
 }
 
-static void ttest_t_result(const TTestState &s, RealResult out) try {
+// Returns a JSON object with all t-test statistics.
+// alpha controls the critical value significance level (default 0.05).
+// Keys: t, df, pooled_var, p_one_tail, p_two_tail, t_crit_one_tail, t_crit_two_tail.
+// t_crit_* are null when alpha is out of range (0, 1).
+static void stats_ttest_result(const TTestState &s, StringResult out) try {
   const auto r = compute_ttest(s);
   if (!r) { out.set_null(); return; }
-  out.set(r->t_stat);
-} catch (...) { out.error("STATS_TTEST_T: unexpected error"); }
 
-static void ttest_df_result(const TTestState &s, RealResult out) try {
-  const auto r = compute_ttest(s);
-  if (!r) { out.set_null(); return; }
-  out.set(r->df);
-} catch (...) { out.error("STATS_TTEST_DF: unexpected error"); }
+  const double p_one    = t_two_tail_p(r->t_stat, r->df) / 2.0;
+  const double p_two    = t_two_tail_p(r->t_stat, r->df);
+  const double alpha    = s.alpha;
+  const double alpha_h  = alpha / 2.0;
+  const bool   crit_ok  = !std::isnan(alpha) && alpha > 0.0 && alpha < 1.0;
+  const bool   crit2_ok = !std::isnan(alpha_h) && alpha_h > 0.0 && alpha_h < 0.5;
 
-static void ttest_pooled_var_result(const TTestState &s, RealResult out) try {
-  const auto r = compute_ttest(s);
-  if (!r) { out.set_null(); return; }
-  out.set(r->pooled_var);
-} catch (...) { out.error("STATS_TTEST_POOLED_VAR: unexpected error"); }
+  char buf[64];
+  std::string json;
+  json.reserve(256);
 
-static void ttest_p_one_tail_result(const TTestState &s, RealResult out) try {
-  const auto r = compute_ttest(s);
-  if (!r) { out.set_null(); return; }
-  out.set(t_two_tail_p(r->t_stat, r->df) / 2.0);
-} catch (...) { out.error("STATS_TTEST_P_ONE_TAIL: unexpected error"); }
+  auto append_dbl = [&](const char *key, double val) {
+    json += '"'; json += key; json += "\":";
+    std::snprintf(buf, sizeof(buf), "%.15g", val);
+    json += buf;
+  };
 
-static void ttest_p_two_tail_result(const TTestState &s, RealResult out) try {
-  const auto r = compute_ttest(s);
-  if (!r) { out.set_null(); return; }
-  out.set(t_two_tail_p(r->t_stat, r->df));
-} catch (...) { out.error("STATS_TTEST_P_TWO_TAIL: unexpected error"); }
+  json += '{';
+  append_dbl("t",           r->t_stat);    json += ',';
+  append_dbl("df",          r->df);        json += ',';
+  append_dbl("pooled_var",  r->pooled_var); json += ',';
+  append_dbl("p_one_tail",  p_one);        json += ',';
+  append_dbl("p_two_tail",  p_two);        json += ',';
+  json += "\"t_crit_one_tail\":";
+  if (crit_ok) {
+    std::snprintf(buf, sizeof(buf), "%.15g", t_critical(alpha, r->df));
+    json += buf;
+  } else {
+    json += "null";
+  }
+  json += ',';
+  json += "\"t_crit_two_tail\":";
+  if (crit2_ok) {
+    std::snprintf(buf, sizeof(buf), "%.15g", t_critical(alpha_h, r->df));
+    json += buf;
+  } else {
+    json += "null";
+  }
+  json += '}';
 
-static void ttest_t_crit_one_tail_result(const TTestState &s, RealResult out) try {
-  const auto r = compute_ttest(s);
-  if (!r) { out.set_null(); return; }
-  if (std::isnan(s.alpha) || s.alpha <= 0.0 || s.alpha >= 1.0) { out.set_null(); return; }
-  out.set(t_critical(s.alpha, r->df));
-} catch (...) { out.error("STATS_TTEST_T_CRIT_ONE_TAIL: unexpected error"); }
+  out.set(json);
+} catch (...) { out.error("STATS_TTEST: unexpected error"); }
 
-// Two-tail critical value splits alpha across both tails.
-static void ttest_t_crit_two_tail_result(const TTestState &s, RealResult out) try {
-  const auto r = compute_ttest(s);
-  if (!r) { out.set_null(); return; }
-  const double alpha_two = s.alpha / 2.0;
-  if (std::isnan(alpha_two) || alpha_two <= 0.0 || alpha_two >= 0.5) { out.set_null(); return; }
-  out.set(t_critical(alpha_two, r->df));
-} catch (...) { out.error("STATS_TTEST_T_CRIT_TWO_TAIL: unexpected error"); }
-
-template<auto ResultFn>
 static constexpr auto make_ttest_func(const char *name) {
-  return vsql::make_aggregate_func<TTestState, ResultFn>(name)
-    .returns(vsql::REAL)
-    .param(vsql::REAL)
-    .param(vsql::REAL)
-    .template clear<&ttest_clear>()
-    .template accumulate<&ttest_accumulate>()
-    .build();
-}
-
-template<auto ResultFn>
-static constexpr auto make_ttest_crit_func(const char *name) {
-  return vsql::make_aggregate_func<TTestState, ResultFn>(name)
-    .returns(vsql::REAL)
+  return vsql::make_aggregate_func<TTestState, &stats_ttest_result>(name)
+    .returns(vsql::STRING)
     .param(vsql::REAL)
     .param(vsql::REAL)
     .param(vsql::REAL)
@@ -1102,13 +1095,7 @@ VEF_GENERATE_ENTRY_POINTS(
     .func(make_stats_func<&stats_median_result>("STATS_MEDIAN"))
     .func(make_stats_func<&stats_iqr_lower_fence_result>("STATS_IQR_LOWER_FENCE"))
     .func(make_stats_func<&stats_iqr_upper_fence_result>("STATS_IQR_UPPER_FENCE"))
-    .func(make_ttest_func<&ttest_t_result>("STATS_TTEST_T"))
-    .func(make_ttest_func<&ttest_df_result>("STATS_TTEST_DF"))
-    .func(make_ttest_func<&ttest_pooled_var_result>("STATS_TTEST_POOLED_VAR"))
-    .func(make_ttest_func<&ttest_p_one_tail_result>("STATS_TTEST_P_ONE_TAIL"))
-    .func(make_ttest_func<&ttest_p_two_tail_result>("STATS_TTEST_P_TWO_TAIL"))
-    .func(make_ttest_crit_func<&ttest_t_crit_one_tail_result>("STATS_TTEST_T_CRIT_ONE_TAIL"))
-    .func(make_ttest_crit_func<&ttest_t_crit_two_tail_result>("STATS_TTEST_T_CRIT_TWO_TAIL"))
+    .func(make_ttest_func("STATS_TTEST"))
     .func(make_mode_str_func<&stats_mode_result>("STATS_MODE"))
     .func(make_mode_real_func<&stats_mode_min_result>("STATS_MODE_MIN"))
     .func(make_mode_real_func<&stats_mode_max_result>("STATS_MODE_MAX"))

@@ -12,10 +12,12 @@ DROP TABLE t_trim;
 # 2. Dynamic critical value bisection limits for tiny alpha
 CREATE TABLE t_ttest (val DOUBLE, grp INT);
 INSERT INTO t_ttest VALUES (10.0, 1), (12.0, 1), (50.0, 2), (52.0, 2);
-# alpha = 1e-6 (standard fixed bisection would cap at 1000.0)
-SELECT STATS_TTEST_T_CRIT_ONE_TAIL(val, grp, 1e-6) > 0 AS crit_val_exists FROM t_ttest;
-# invalid alpha values return NULL
-SELECT STATS_TTEST_T_CRIT_ONE_TAIL(val, grp, -0.05) AS crit_neg, STATS_TTEST_T_CRIT_ONE_TAIL(val, grp, 1.05) AS crit_large FROM t_ttest;
+# alpha = 1e-6 (standard fixed bisection would cap at 1000.0): t_crit_one_tail > 0
+SELECT JSON_EXTRACT(CAST(STATS_TTEST(val, grp, 1e-6) AS CHAR), '$.t_crit_one_tail') > 0 AS crit_val_exists FROM t_ttest;
+# invalid alpha values produce null for critical value fields
+SELECT JSON_EXTRACT(CAST(STATS_TTEST(val, grp, -0.05) AS CHAR), '$.t_crit_one_tail') AS crit_neg,
+       JSON_EXTRACT(CAST(STATS_TTEST(val, grp,  1.05) AS CHAR), '$.t_crit_one_tail') AS crit_large
+FROM t_ttest;
 DROP TABLE t_ttest;
 
 DROP DATABASE vsql_test;

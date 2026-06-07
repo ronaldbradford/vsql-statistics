@@ -9,12 +9,14 @@ NULL	NULL
 DROP TABLE t_trim;
 CREATE TABLE t_ttest (val DOUBLE, grp INT);
 INSERT INTO t_ttest VALUES (10.0, 1), (12.0, 1), (50.0, 2), (52.0, 2);
-SELECT STATS_TTEST_T_CRIT_ONE_TAIL(val, grp, 1e-6) > 0 AS crit_val_exists FROM t_ttest;
+SELECT JSON_EXTRACT(CAST(STATS_TTEST(val, grp, 1e-6) AS CHAR), '$.t_crit_one_tail') > 0 AS crit_val_exists FROM t_ttest;
 crit_val_exists
 1
-SELECT STATS_TTEST_T_CRIT_ONE_TAIL(val, grp, -0.05) AS crit_neg, STATS_TTEST_T_CRIT_ONE_TAIL(val, grp, 1.05) AS crit_large FROM t_ttest;
+SELECT JSON_EXTRACT(CAST(STATS_TTEST(val, grp, -0.05) AS CHAR), '$.t_crit_one_tail') AS crit_neg,
+JSON_EXTRACT(CAST(STATS_TTEST(val, grp,  1.05) AS CHAR), '$.t_crit_one_tail') AS crit_large
+FROM t_ttest;
 crit_neg	crit_large
-NULL	NULL
+null	null
 DROP TABLE t_ttest;
 DROP DATABASE vsql_test;
 UNINSTALL EXTENSION vsql_statistics;

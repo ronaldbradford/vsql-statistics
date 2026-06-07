@@ -1,86 +1,57 @@
-# vsql_statistics: Two-sample t-test assuming equal variances (pooled-variance)
+# vsql_statistics: Two-sample t-test (pooled variance) — single JSON function
 INSTALL EXTENSION vsql_statistics;
-# --- Two groups with DOUBLE value column: t=1.0 exactly ---
+# --- Basic case: t=1.0 exactly, df=8, pooled_var=250, alpha=0.05 ---
 # Group 1: {100,110,120,130,140}  mean=120, var=250
-# Group 2: { 90,100,110,120,130}  mean=110, var=250
-# pooled_var=250, df=8, t=(120-110)/sqrt(250*2/5)=1.0
+# Group 2: {  90,100,110,120,130} mean=110, var=250
 CREATE TABLE ttest_basic (value DOUBLE, grp INT);
 INSERT INTO ttest_basic VALUES
 (100,1),(110,1),(120,1),(130,1),(140,1),
 (90,2),(100,2),(110,2),(120,2),(130,2);
-SELECT STATS_TTEST_T(value, grp)           AS t_stat        FROM ttest_basic;
-t_stat
-1
-SELECT STATS_TTEST_DF(value, grp)          AS df            FROM ttest_basic;
-df
-8
-SELECT STATS_TTEST_POOLED_VAR(value, grp)  AS pooled_var    FROM ttest_basic;
-pooled_var
-250
-SELECT STATS_TTEST_P_ONE_TAIL(value, grp)  AS p_one_tail    FROM ttest_basic;
-p_one_tail
-0.17329675354366686
-SELECT STATS_TTEST_P_TWO_TAIL(value, grp)  AS p_two_tail    FROM ttest_basic;
-p_two_tail
-0.3465935070873337
-SELECT STATS_TTEST_T_CRIT_ONE_TAIL(value, grp, 0.05) AS t_crit_one FROM ttest_basic;
-t_crit_one
-1.8595480375307076
-SELECT STATS_TTEST_T_CRIT_TWO_TAIL(value, grp, 0.05) AS t_crit_two FROM ttest_basic;
-t_crit_two
-2.306004135204155
-# --- Reversed groups produce negative t; two-tail p is symmetric ---
-SELECT STATS_TTEST_T(value, IF(grp=1,2,1))          AS t_neg       FROM ttest_basic;
-t_neg
--1
-SELECT STATS_TTEST_P_TWO_TAIL(value, IF(grp=1,2,1)) AS p_two_same  FROM ttest_basic;
-p_two_same
-0.3465935070873337
+SELECT CAST(STATS_TTEST(value, grp, 0.05) AS CHAR) AS ttest FROM ttest_basic;
+ttest
+{"t":1,"df":8,"pooled_var":250,"p_one_tail":0.173296753543667,"p_two_tail":0.346593507087334,"t_crit_one_tail":1.85954803753071,"t_crit_two_tail":2.30600413520416}
+# --- Reversed groups: t is negated; two-tail p and critical values unchanged ---
+SELECT CAST(STATS_TTEST(value, IF(grp=1,2,1), 0.05) AS CHAR) AS ttest_rev FROM ttest_basic;
+ttest_rev
+{"t":-1,"df":8,"pooled_var":250,"p_one_tail":0.173296753543667,"p_two_tail":0.346593507087334,"t_crit_one_tail":1.85954803753071,"t_crit_two_tail":2.30600413520416}
 DROP TABLE ttest_basic;
-# --- INT value column returns integer-rounded results (expected VEF limitation) ---
-# Workaround: CAST(value AS DOUBLE) restores decimal precision.
+# --- Custom alpha=0.01: critical values are larger than at alpha=0.05 ---
+CREATE TABLE ttest_alpha (value DOUBLE, grp INT);
+INSERT INTO ttest_alpha VALUES
+(100,1),(110,1),(120,1),(130,1),(140,1),
+(90,2),(100,2),(110,2),(120,2),(130,2);
+SELECT CAST(STATS_TTEST(value, grp, 0.01) AS CHAR) AS ttest_001 FROM ttest_alpha;
+ttest_001
+{"t":1,"df":8,"pooled_var":250,"p_one_tail":0.173296753543667,"p_two_tail":0.346593507087334,"t_crit_one_tail":2.8964594477096,"t_crit_two_tail":3.35538733133335}
+DROP TABLE ttest_alpha;
+# --- INT value column: workaround with CAST ---
 CREATE TABLE ttest_int_col (v INT, grp INT);
 INSERT INTO ttest_int_col VALUES
 (100,1),(110,1),(120,1),(130,1),(140,1),
 (90,2),(100,2),(110,2),(120,2),(130,2);
-SELECT STATS_TTEST_P_TWO_TAIL(v, grp)                  AS p_int_rounded FROM ttest_int_col;
-p_int_rounded
-0.
-SELECT STATS_TTEST_P_TWO_TAIL(CAST(v AS DOUBLE), grp)  AS p_double_cast FROM ttest_int_col;
-p_double_cast
-0.3465935070873337
+SELECT CAST(STATS_TTEST(CAST(v AS DOUBLE), grp, 0.05) AS CHAR) AS ttest_cast FROM ttest_int_col;
+ttest_cast
+{"t":1,"df":8,"pooled_var":250,"p_one_tail":0.173296753543667,"p_two_tail":0.346593507087334,"t_crit_one_tail":1.85954803753071,"t_crit_two_tail":2.30600413520416}
 DROP TABLE ttest_int_col;
 # --- Edge case: only one group present returns NULL ---
 CREATE TABLE ttest_one_group (value DOUBLE, grp INT);
 INSERT INTO ttest_one_group VALUES (10,1),(20,1),(30,1);
-SELECT STATS_TTEST_T(value, grp) AS t_one_group FROM ttest_one_group;
-t_one_group
+SELECT CAST(STATS_TTEST(value, grp, 0.05) AS CHAR) AS ttest_one FROM ttest_one_group;
+ttest_one
 NULL
 DROP TABLE ttest_one_group;
 # --- Edge case: group with fewer than 2 observations returns NULL ---
 CREATE TABLE ttest_small_group (value DOUBLE, grp INT);
 INSERT INTO ttest_small_group VALUES (5,1),(10,2),(20,2),(30,2);
-SELECT STATS_TTEST_T(value, grp) AS t_small_group FROM ttest_small_group;
-t_small_group
+SELECT CAST(STATS_TTEST(value, grp, 0.05) AS CHAR) AS ttest_small FROM ttest_small_group;
+ttest_small
 NULL
 DROP TABLE ttest_small_group;
 # --- Edge case: all-NULL values returns NULL ---
 CREATE TABLE ttest_nulls (value DOUBLE, grp INT);
 INSERT INTO ttest_nulls VALUES (NULL,1),(NULL,2);
-SELECT STATS_TTEST_T(value, grp) AS t_all_null FROM ttest_nulls;
-t_all_null
+SELECT CAST(STATS_TTEST(value, grp, 0.05) AS CHAR) AS ttest_null FROM ttest_nulls;
+ttest_null
 NULL
 DROP TABLE ttest_nulls;
-# --- Custom alpha: critical value at alpha=0.01 is larger than at alpha=0.05 ---
-CREATE TABLE ttest_alpha (value DOUBLE, grp INT);
-INSERT INTO ttest_alpha VALUES
-(100,1),(110,1),(120,1),(130,1),(140,1),
-(90,2),(100,2),(110,2),(120,2),(130,2);
-SELECT
-STATS_TTEST_T_CRIT_TWO_TAIL(value, grp, 0.05) AS t_crit_005,
-STATS_TTEST_T_CRIT_TWO_TAIL(value, grp, 0.01) AS t_crit_001
-FROM ttest_alpha;
-t_crit_005	t_crit_001
-2.306004135204155	3.355387331333355
-DROP TABLE ttest_alpha;
 UNINSTALL EXTENSION vsql_statistics;
