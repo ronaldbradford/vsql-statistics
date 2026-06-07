@@ -217,11 +217,14 @@ static double t_critical(double alpha, double df) {
   return (lo + hi) / 2.0;
 }
 
-// Pooled-variance t-test statistics computed once and shared by all result fns.
+// All t-test statistics including per-group descriptives (matches Excel output).
 struct TTestResult {
-  double t_stat;
-  double df;
+  double mean1, mean2;
+  double var1, var2;    // sample variance: ssq / (n-1)
+  double n1, n2;
   double pooled_var;
+  double df;
+  double t_stat;
 };
 
 // Returns nullopt if either group has fewer than 2 observations (df ≤ 0)
@@ -247,19 +250,44 @@ static std::optional<TTestResult> compute_ttest(const TTestState &s) {
   const double pooled_var = (ssq1 + ssq2) / df;
 
   if (pooled_var == 0.0) {
-    // Both groups have zero variance; t is 0 iff means are equal, else undefined.
-    if (mean1 == mean2) return TTestResult{0.0, df, 0.0};
+    if (mean1 == mean2) return TTestResult{mean1, mean2, 0.0, 0.0,
+                                           static_cast<double>(n1), static_cast<double>(n2),
+                                           0.0, df, 0.0};
     return std::nullopt;
   }
 
-  const double t = (mean1 - mean2) / std::sqrt(pooled_var * (1.0 / static_cast<double>(n1)
-                                                            + 1.0 / static_cast<double>(n2)));
-  return TTestResult{t, df, pooled_var};
+  const double t    = (mean1 - mean2) / std::sqrt(pooled_var * (1.0 / static_cast<double>(n1)
+                                                               + 1.0 / static_cast<double>(n2)));
+  const double var1 = ssq1 / static_cast<double>(n1 - 1);
+  const double var2 = ssq2 / static_cast<double>(n2 - 1);
+  return TTestResult{mean1, mean2, var1, var2,
+                     static_cast<double>(n1), static_cast<double>(n2),
+                     pooled_var, df, t};
 }
 
-// Returns a JSON object with all t-test statistics.
-// alpha controls the critical value significance level (default 0.05).
-// Keys: t, df, pooled_var, p_one_tail, p_two_tail, t_crit_one_tail, t_crit_two_tail.
+// Format a double without scientific notation. Uses fixed notation (trimmed) for
+// values where %g would emit an exponent (|val| < 1e-4), and %g otherwise.
+static std::string fmt_no_exp(double val) {
+  char buf[64];
+  if (val != 0.0 && std::fabs(val) < 1e-4) {
+    std::snprintf(buf, sizeof(buf), "%.15f", val);
+    // Trim trailing zeros, but keep at least one decimal digit.
+    std::string s(buf);
+    const size_t dot = s.find('.');
+    if (dot != std::string::npos) {
+      size_t last = s.find_last_not_of('0');
+      if (last != std::string::npos && last > dot) s.erase(last + 1);
+      else if (last == dot)                         s.erase(dot + 2);
+    }
+    return s;
+  }
+  std::snprintf(buf, sizeof(buf), "%.15g", val);
+  return std::string(buf);
+}
+
+// Returns a JSON object matching Excel's t-Test: Two-Sample Assuming Equal Variances output.
+// Field order: mean_1, mean_2, variance_1, variance_2, n_1, n_2, pooled_var, df, t,
+//              p_one_tail, t_crit_one_tail, p_two_tail, t_crit_two_tail.
 // t_crit_* are null when alpha is out of range (0, 1).
 static void stats_ttest_result(const TTestState &s, StringResult out) try {
   const auto r = compute_ttest(s);
@@ -272,37 +300,31 @@ static void stats_ttest_result(const TTestState &s, StringResult out) try {
   const bool   crit_ok  = !std::isnan(alpha) && alpha > 0.0 && alpha < 1.0;
   const bool   crit2_ok = !std::isnan(alpha_h) && alpha_h > 0.0 && alpha_h < 0.5;
 
-  char buf[64];
   std::string json;
-  json.reserve(256);
+  json.reserve(512);
 
-  auto append_dbl = [&](const char *key, double val) {
+  auto append = [&](const char *key, double val) {
     json += '"'; json += key; json += "\":";
-    std::snprintf(buf, sizeof(buf), "%.15g", val);
-    json += buf;
+    json += fmt_no_exp(val);
   };
 
   json += '{';
-  append_dbl("t",           r->t_stat);    json += ',';
-  append_dbl("df",          r->df);        json += ',';
-  append_dbl("pooled_var",  r->pooled_var); json += ',';
-  append_dbl("p_one_tail",  p_one);        json += ',';
-  append_dbl("p_two_tail",  p_two);        json += ',';
+  append("mean_1",      r->mean1);      json += ',';
+  append("mean_2",      r->mean2);      json += ',';
+  append("variance_1",  r->var1);       json += ',';
+  append("variance_2",  r->var2);       json += ',';
+  append("n_1",         r->n1);         json += ',';
+  append("n_2",         r->n2);         json += ',';
+  append("pooled_var",  r->pooled_var); json += ',';
+  append("df",          r->df);         json += ',';
+  append("t",           r->t_stat);     json += ',';
+  append("p_one_tail",  p_one);         json += ',';
   json += "\"t_crit_one_tail\":";
-  if (crit_ok) {
-    std::snprintf(buf, sizeof(buf), "%.15g", t_critical(alpha, r->df));
-    json += buf;
-  } else {
-    json += "null";
-  }
+  json += crit_ok  ? fmt_no_exp(t_critical(alpha,   r->df)) : "null";
   json += ',';
+  append("p_two_tail",  p_two);         json += ',';
   json += "\"t_crit_two_tail\":";
-  if (crit2_ok) {
-    std::snprintf(buf, sizeof(buf), "%.15g", t_critical(alpha_h, r->df));
-    json += buf;
-  } else {
-    json += "null";
-  }
+  json += crit2_ok ? fmt_no_exp(t_critical(alpha_h, r->df)) : "null";
   json += '}';
 
   out.set(json);
