@@ -1,57 +1,65 @@
-# vsql_statistics: Two-sample t-test (pooled variance) — single JSON function
+# vsql_statistics: Two-sample t-test (pooled variance)
 INSTALL EXTENSION vsql_statistics;
-# --- Basic case: t=1.0 exactly, df=8, pooled_var=250, alpha=0.05 ---
+# --- STATS_TTEST: inference statistics ---
 # Group 1: {100,110,120,130,140}  mean=120, var=250
 # Group 2: {  90,100,110,120,130} mean=110, var=250
+# pooled_var=250, df=8, t=1.0, alpha=0.05
 CREATE TABLE ttest_basic (value DOUBLE, grp INT);
 INSERT INTO ttest_basic VALUES
 (100,1),(110,1),(120,1),(130,1),(140,1),
 (90,2),(100,2),(110,2),(120,2),(130,2);
-SELECT CAST(STATS_TTEST(value, grp, 0.05) AS CHAR(1000)) AS ttest FROM ttest_basic;
+SELECT CAST(STATS_TTEST(value, grp, 0.05) AS CHAR) AS ttest FROM ttest_basic;
 ttest
-{"mean_1":120,"mean_2":110,"variance_1":250,"variance_2":250,"n_1":5,"n_2":5,"pooled_var":250,"df":8,"t":1,"p_one_tail":0.173296753543667,"t_crit_one_tail":1.85954803753071,"p_two_tail":0.346593507087334,"t_crit_two_tail":2.30600413520416}
-# --- Reversed groups: t is negated; two-tail p and critical values unchanged ---
-SELECT CAST(STATS_TTEST(value, IF(grp=1,2,1), 0.05) AS CHAR(1000)) AS ttest_rev FROM ttest_basic;
+{"pooled_var":250,"df":8,"t":1,"p_one_tail":0.173296753543667,"t_crit_one_tail":1.85954803753071,"p_two_tail":0.346593507087334,"t_crit_two_tail":2.30600413520416}
+# --- STATS_TTEST_GROUPS: per-group descriptives ---
+SELECT CAST(STATS_TTEST_GROUPS(value, grp) AS CHAR) AS ttest_groups FROM ttest_basic;
+ttest_groups
+{"mean_1":120,"mean_2":110,"variance_1":250,"variance_2":250,"n_1":5,"n_2":5}
+# --- Reversed groups: t negated; groups swap; two-tail values unchanged ---
+SELECT CAST(STATS_TTEST(value, IF(grp=1,2,1), 0.05) AS CHAR) AS ttest_rev FROM ttest_basic;
 ttest_rev
-{"mean_1":110,"mean_2":120,"variance_1":250,"variance_2":250,"n_1":5,"n_2":5,"pooled_var":250,"df":8,"t":-1,"p_one_tail":0.173296753543667,"t_crit_one_tail":1.85954803753071,"p_two_tail":0.346593507087334,"t_crit_two_tail":2.30600413520416}
+{"pooled_var":250,"df":8,"t":-1,"p_one_tail":0.173296753543667,"t_crit_one_tail":1.85954803753071,"p_two_tail":0.346593507087334,"t_crit_two_tail":2.30600413520416}
+SELECT CAST(STATS_TTEST_GROUPS(value, IF(grp=1,2,1)) AS CHAR) AS ttest_groups_rev FROM ttest_basic;
+ttest_groups_rev
+{"mean_1":110,"mean_2":120,"variance_1":250,"variance_2":250,"n_1":5,"n_2":5}
 DROP TABLE ttest_basic;
-# --- Custom alpha=0.01: critical values are larger than at alpha=0.05 ---
+# --- Custom alpha=0.01: critical values larger than alpha=0.05 ---
 CREATE TABLE ttest_alpha (value DOUBLE, grp INT);
 INSERT INTO ttest_alpha VALUES
 (100,1),(110,1),(120,1),(130,1),(140,1),
 (90,2),(100,2),(110,2),(120,2),(130,2);
-SELECT CAST(STATS_TTEST(value, grp, 0.01) AS CHAR(1000)) AS ttest_001 FROM ttest_alpha;
+SELECT CAST(STATS_TTEST(value, grp, 0.01) AS CHAR) AS ttest_001 FROM ttest_alpha;
 ttest_001
-{"mean_1":120,"mean_2":110,"variance_1":250,"variance_2":250,"n_1":5,"n_2":5,"pooled_var":250,"df":8,"t":1,"p_one_tail":0.173296753543667,"t_crit_one_tail":2.8964594477096,"p_two_tail":0.346593507087334,"t_crit_two_tail":3.35538733133335}
+{"pooled_var":250,"df":8,"t":1,"p_one_tail":0.173296753543667,"t_crit_one_tail":2.8964594477096,"p_two_tail":0.346593507087334,"t_crit_two_tail":3.35538733133335}
 DROP TABLE ttest_alpha;
-# --- INT value column: workaround with CAST ---
-CREATE TABLE ttest_int_col (v INT, grp INT);
-INSERT INTO ttest_int_col VALUES
-(100,1),(110,1),(120,1),(130,1),(140,1),
-(90,2),(100,2),(110,2),(120,2),(130,2);
-SELECT CAST(STATS_TTEST(CAST(v AS DOUBLE), grp, 0.05) AS CHAR(1000)) AS ttest_cast FROM ttest_int_col;
-ttest_cast
-{"mean_1":120,"mean_2":110,"variance_1":250,"variance_2":250,"n_1":5,"n_2":5,"pooled_var":250,"df":8,"t":1,"p_one_tail":0.173296753543667,"t_crit_one_tail":1.85954803753071,"p_two_tail":0.346593507087334,"t_crit_two_tail":2.30600413520416}
-DROP TABLE ttest_int_col;
-# --- Edge case: only one group present returns NULL ---
+# --- Edge case: only one group returns NULL ---
 CREATE TABLE ttest_one_group (value DOUBLE, grp INT);
 INSERT INTO ttest_one_group VALUES (10,1),(20,1),(30,1);
-SELECT CAST(STATS_TTEST(value, grp, 0.05) AS CHAR(1000)) AS ttest_one FROM ttest_one_group;
+SELECT CAST(STATS_TTEST(value, grp, 0.05) AS CHAR)  AS ttest_one        FROM ttest_one_group;
 ttest_one
+NULL
+SELECT CAST(STATS_TTEST_GROUPS(value, grp) AS CHAR) AS ttest_groups_one FROM ttest_one_group;
+ttest_groups_one
 NULL
 DROP TABLE ttest_one_group;
 # --- Edge case: group with fewer than 2 observations returns NULL ---
 CREATE TABLE ttest_small_group (value DOUBLE, grp INT);
 INSERT INTO ttest_small_group VALUES (5,1),(10,2),(20,2),(30,2);
-SELECT CAST(STATS_TTEST(value, grp, 0.05) AS CHAR(1000)) AS ttest_small FROM ttest_small_group;
+SELECT CAST(STATS_TTEST(value, grp, 0.05) AS CHAR)  AS ttest_small        FROM ttest_small_group;
 ttest_small
+NULL
+SELECT CAST(STATS_TTEST_GROUPS(value, grp) AS CHAR) AS ttest_groups_small FROM ttest_small_group;
+ttest_groups_small
 NULL
 DROP TABLE ttest_small_group;
 # --- Edge case: all-NULL values returns NULL ---
 CREATE TABLE ttest_nulls (value DOUBLE, grp INT);
 INSERT INTO ttest_nulls VALUES (NULL,1),(NULL,2);
-SELECT CAST(STATS_TTEST(value, grp, 0.05) AS CHAR(1000)) AS ttest_null FROM ttest_nulls;
+SELECT CAST(STATS_TTEST(value, grp, 0.05) AS CHAR)  AS ttest_null        FROM ttest_nulls;
 ttest_null
+NULL
+SELECT CAST(STATS_TTEST_GROUPS(value, grp) AS CHAR) AS ttest_groups_null FROM ttest_nulls;
+ttest_groups_null
 NULL
 DROP TABLE ttest_nulls;
 UNINSTALL EXTENSION vsql_statistics;

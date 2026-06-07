@@ -285,10 +285,10 @@ static std::string fmt_no_exp(double val) {
   return std::string(buf);
 }
 
-// Returns a JSON object matching Excel's t-Test: Two-Sample Assuming Equal Variances output.
-// Field order: mean_1, mean_2, variance_1, variance_2, n_1, n_2, pooled_var, df, t,
-//              p_one_tail, t_crit_one_tail, p_two_tail, t_crit_two_tail.
-// t_crit_* are null when alpha is out of range (0, 1).
+// Inference statistics only: pooled_var, df, t, p_one_tail, t_crit_one_tail,
+// p_two_tail, t_crit_two_tail. t_crit_* are null when alpha is out of range.
+// Kept separate from per-group descriptives to stay within the VEF 255-byte
+// STRING limit (see villagesql/villagesql-server#641).
 static void stats_ttest_result(const TTestState &s, StringResult out) try {
   const auto r = compute_ttest(s);
   if (!r) { out.set_null(); return; }
@@ -301,7 +301,7 @@ static void stats_ttest_result(const TTestState &s, StringResult out) try {
   const bool   crit2_ok = !std::isnan(alpha_h) && alpha_h > 0.0 && alpha_h < 0.5;
 
   std::string json;
-  json.reserve(512);
+  json.reserve(256);
 
   auto append = [&](const char *key, double val) {
     json += '"'; json += key; json += "\":";
@@ -309,12 +309,6 @@ static void stats_ttest_result(const TTestState &s, StringResult out) try {
   };
 
   json += '{';
-  append("mean_1",      r->mean1);      json += ',';
-  append("mean_2",      r->mean2);      json += ',';
-  append("variance_1",  r->var1);       json += ',';
-  append("variance_2",  r->var2);       json += ',';
-  append("n_1",         r->n1);         json += ',';
-  append("n_2",         r->n2);         json += ',';
   append("pooled_var",  r->pooled_var); json += ',';
   append("df",          r->df);         json += ',';
   append("t",           r->t_stat);     json += ',';
@@ -330,6 +324,32 @@ static void stats_ttest_result(const TTestState &s, StringResult out) try {
   out.set(json);
 } catch (...) { out.error("STATS_TTEST: unexpected error"); }
 
+// Per-group descriptives: mean, sample variance, and observation count for
+// each group. Complements STATS_TTEST — use both together for a full picture.
+static void stats_ttest_groups_result(const TTestState &s, StringResult out) try {
+  const auto r = compute_ttest(s);
+  if (!r) { out.set_null(); return; }
+
+  std::string json;
+  json.reserve(200);
+
+  auto append = [&](const char *key, double val) {
+    json += '"'; json += key; json += "\":";
+    json += fmt_no_exp(val);
+  };
+
+  json += '{';
+  append("mean_1",     r->mean1); json += ',';
+  append("mean_2",     r->mean2); json += ',';
+  append("variance_1", r->var1);  json += ',';
+  append("variance_2", r->var2);  json += ',';
+  append("n_1",        r->n1);    json += ',';
+  append("n_2",        r->n2);
+  json += '}';
+
+  out.set(json);
+} catch (...) { out.error("STATS_TTEST_GROUPS: unexpected error"); }
+
 static constexpr auto make_ttest_func(const char *name) {
   return vsql::make_aggregate_func<TTestState, &stats_ttest_result>(name)
     .returns(vsql::STRING)
@@ -338,6 +358,16 @@ static constexpr auto make_ttest_func(const char *name) {
     .param(vsql::REAL)
     .template clear<&ttest_clear>()
     .template accumulate<&ttest_crit_accumulate>()
+    .build();
+}
+
+static constexpr auto make_ttest_groups_func(const char *name) {
+  return vsql::make_aggregate_func<TTestState, &stats_ttest_groups_result>(name)
+    .returns(vsql::STRING)
+    .param(vsql::REAL)
+    .param(vsql::REAL)
+    .template clear<&ttest_clear>()
+    .template accumulate<&ttest_accumulate>()
     .build();
 }
 
@@ -1118,6 +1148,7 @@ VEF_GENERATE_ENTRY_POINTS(
     .func(make_stats_func<&stats_iqr_lower_fence_result>("STATS_IQR_LOWER_FENCE"))
     .func(make_stats_func<&stats_iqr_upper_fence_result>("STATS_IQR_UPPER_FENCE"))
     .func(make_ttest_func("STATS_TTEST"))
+    .func(make_ttest_groups_func("STATS_TTEST_GROUPS"))
     .func(make_mode_str_func<&stats_mode_result>("STATS_MODE"))
     .func(make_mode_real_func<&stats_mode_min_result>("STATS_MODE_MIN"))
     .func(make_mode_real_func<&stats_mode_max_result>("STATS_MODE_MAX"))
