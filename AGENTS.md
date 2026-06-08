@@ -9,11 +9,11 @@ This file provides guidance to AI coding assistants when working with code in th
 `vsql-statistics` is a VillageSQL extension that provides statistical aggregate functions for data scientists. It implements two families of functions:
 
 - **IQR family (6 functions):** `STATS_IQR`, `STATS_Q1`, `STATS_Q3`, `STATS_MEDIAN`, `STATS_IQR_LOWER_FENCE`, `STATS_IQR_UPPER_FENCE`
-- **Two-sample t-test family (7 functions):** `STATS_TTEST_T`, `STATS_TTEST_DF`, `STATS_TTEST_POOLED_VAR`, `STATS_TTEST_P_ONE_TAIL`, `STATS_TTEST_P_TWO_TAIL`, `STATS_TTEST_T_CRIT_ONE_TAIL`, `STATS_TTEST_T_CRIT_TWO_TAIL`
+- **Two-sample t-test family (2 JSON functions):** `STATS_TTEST`, `STATS_TTEST_GROUPS`
 - **Mode family (3 functions):** `STATS_MODE`, `STATS_MODE_MIN`, `STATS_MODE_MAX`
 - **Skewness family (2 functions):** `STATS_SKEWNESS`, `STATS_SKEWNESS_PEARSON`
 - **Z-test family (3 functions):** `STATS_ZTEST_Z`, `STATS_ZTEST_P_ONE_TAIL`, `STATS_ZTEST_P_TWO_TAIL`
-- **Chi-squared family (5 functions):** `STATS_CHISQ_GOF`, `STATS_CHISQ_GOF_DF`, `STATS_CHISQ_GOF_P`, `STATS_CHISQ_INDEP`, `STATS_CHISQ_INDEP_P`
+- **Chi-squared family (2 JSON functions):** `STATS_CHISQ_GOF`, `STATS_CHISQ_INDEP`
 - **Kurtosis family (2 functions):** `STATS_KURTOSIS`, `STATS_KURTOSIS_EXCESS`
 - **Covariance family (2 functions):** `STATS_COVARIANCE_POP`, `STATS_COVARIANCE_SAMP`
 - **Means family — beta (4 functions):** `STATS_MEAN_TRIMMED`, `STATS_MEAN_WINSORIZED`, `STATS_MEAN_GEOMETRIC`, `STATS_MEAN_HARMONIC`
@@ -45,7 +45,7 @@ struct StatsState {
 ```
 The IQR family (6 functions) shares one `StatsState` with a single `values` vector, a shared `clear()` and `accumulate()`. Each function has its own `result()` that sorts and computes the statistic.
 
-The t-test family (7 functions) uses `TTestState` with separate `group1`/`group2` vectors and a stored `alpha`. Group membership is passed as the second argument (1 = group 1, 2 = group 2). The 3-parameter critical-value functions also accept alpha directly.
+The t-test family (2 JSON functions) uses `TTestState` with separate `group1`/`group2` vectors and a stored `alpha`. Group membership is passed as the second argument (1 = group 1, 2 = group 2). `STATS_TTEST(value, group, alpha)` returns a JSON STRING with `{pooled_var, df, t, p_one_tail, t_crit_one_tail, p_two_tail, t_crit_two_tail}`; `STATS_TTEST_GROUPS(value, group)` returns `{mean_1, mean_2, variance_1, variance_2, n_1, n_2}`.
 
 The mode family (3 functions) uses `ModeState` with `std::unordered_map<double, size_t>` for frequency counting. `STATS_MODE` returns a JSON STRING; `STATS_MODE_MIN` and `STATS_MODE_MAX` return REAL. All three return NULL when no value appears more than once. NaN inputs are skipped alongside NULLs.
 
@@ -57,7 +57,7 @@ The kurtosis family (2 functions) uses `KurtState` — a streaming accumulator o
 
 The means family (4 functions — beta) uses three states. `MeanTrimState` (vector + trim_pct) serves both `STATS_MEAN_TRIMMED` and `STATS_MEAN_WINSORIZED` (2-param functions). `MeanGeoState` (n, sum_log) is a streaming accumulator for `STATS_MEAN_GEOMETRIC`: accumulates Σln(xi) for positive values, then returns exp(sum_log/n). `MeanHarmState` (n, sum_recip) is a streaming accumulator for `STATS_MEAN_HARMONIC`: accumulates Σ(1/xi) for positive values, then returns n/sum_recip. Non-positive inputs are silently skipped for both geometric and harmonic.
 
-The chi-squared family (5 functions) uses two states. `ChiSqGofState` (chi_sq, k) serves the three GoF functions and also `STATS_CHISQ_INDEP` (same formula, no n_rows/n_cols needed). `ChiSqIndepState` (chi_sq, k, n_rows, n_cols) serves `STATS_CHISQ_INDEP_P`, which accepts the number of rows and columns as constant parameters per row. The p-value is the regularized upper incomplete gamma Q(df/2, χ²/2); computed via series expansion (x < a+1) or Lentz's continued fraction (x ≥ a+1). Rows where expected ≤ 0 are skipped. All five functions return NULL when no valid (O, E) pairs exist.
+The chi-squared family (2 JSON functions) uses two states. `ChiSqGofState` (chi_sq, k) serves `STATS_CHISQ_GOF(observed, expected)`, which returns a JSON STRING `{chi_sq, df, p}` where df = k−1 and p is null when df = 0. `ChiSqIndepState` (chi_sq, k, n_rows, n_cols) serves `STATS_CHISQ_INDEP(observed, expected, n_rows, n_cols)`, which returns `{chi_sq, df, p}` where df = (n_rows−1)(n_cols−1); df and p are null when dimensions are missing or df ≤ 0. The p-value is the regularized upper incomplete gamma Q(df/2, χ²/2); computed via series expansion (x < a+1) or Lentz's continued fraction (x ≥ a+1). Rows where expected ≤ 0 are skipped. Both functions return NULL when no valid (O, E) pairs exist. Use `CAST(... AS CHAR)` to read results in the mysql CLI.
 
 The covariance family (2 functions) uses `CovState` — a streaming accumulator of n, mean_x, mean_y, and C (Welford's co-moment). Each row passes two REAL arguments (x, y); a row is skipped if either is NULL (concurrent-pair discard). `STATS_COVARIANCE_POP` returns C/n (0.0 for n=1, NULL for n=0). `STATS_COVARIANCE_SAMP` returns C/(n−1) (NULL for n < 2).
 
@@ -71,7 +71,7 @@ The covariance family (2 functions) uses `CovState` — a streaming accumulator 
 **Function registration:** `make_aggregate_func<StatsState, &result_fn>(name).returns(REAL).param(REAL).clear<&stats_clear>().accumulate<&stats_accumulate>().build()`
 
 **Key files:**
-- `src/vsql_statistics.cc` — all 34 aggregate functions (6 IQR + 7 t-test + 3 mode + 2 skewness + 3 z-test + 5 chi-squared + 2 kurtosis + 2 covariance + 4 means)
+- `src/vsql_statistics.cc` — all 33 aggregate functions (6 IQR + 2 t-test + 3 mode + 2 skewness + 3 z-test + 2 chi-squared + 2 kurtosis + 2 covariance + 4 means + 9 ANOVA)
 - `manifest.json` — extension metadata
 - `CMakeLists.txt` — build configuration
 - `cmake/FindVillageSQL.cmake` — SDK discovery
@@ -95,8 +95,8 @@ See `TESTING.md` for full instructions.
 - Include: `<villagesql/vsql.h>`, `using namespace vsql;`
 - Aggregate registration: `make_aggregate_func<State, &result_fn>(name)`
 - Input wrapper: `RealArg` — `is_null()`, `value()` → `double`
-- Result wrapper: `RealResult` — `set(double)`, `set_null()`
-- Type constants: `vsql::REAL`
+- Result wrappers: `RealResult` — `set(double)`, `set_null()`; `StringResult` — `set(std::string)`, `set_null()`
+- Type constants: `vsql::REAL`, `vsql::STRING`
 - Entry point macro: `VEF_GENERATE_ENTRY_POINTS`
 
 ## Installation
@@ -104,15 +104,15 @@ See `TESTING.md` for full instructions.
 ```sql
 INSTALL EXTENSION vsql_statistics;
 SELECT STATS_IQR(CAST(col AS DOUBLE)) FROM t GROUP BY group_col;
-SELECT STATS_TTEST_T(value, grp) FROM t;
+SELECT CAST(STATS_TTEST(value, grp, 0.05) AS CHAR) FROM t;
+SELECT CAST(STATS_TTEST_GROUPS(value, grp) AS CHAR) FROM t;
 SELECT STATS_MODE(CAST(col AS DOUBLE)) FROM t;
 SELECT STATS_SKEWNESS(col) FROM t;
 SELECT STATS_SKEWNESS_PEARSON(col) FROM t;
 SELECT STATS_ZTEST_Z(col, 500.0, 40.0) FROM t;
 SELECT STATS_ZTEST_P_TWO_TAIL(col, 500.0, 40.0) FROM t;
-SELECT STATS_CHISQ_GOF(observed, expected) FROM t;
-SELECT STATS_CHISQ_GOF_P(observed, expected) FROM t;
-SELECT STATS_CHISQ_INDEP_P(observed, expected, 2.0, 3.0) FROM t;
+SELECT CAST(STATS_CHISQ_GOF(observed, expected) AS CHAR) FROM t;
+SELECT CAST(STATS_CHISQ_INDEP(observed, expected, 2.0, 3.0) AS CHAR) FROM t;
 UNINSTALL EXTENSION vsql_statistics;
 ```
 

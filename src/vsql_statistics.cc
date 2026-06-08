@@ -678,27 +678,32 @@ static void chisq_gof_accumulate(ChiSqGofState &s, RealArg observed, RealArg exp
   chisq_accumulate_cell(s.chi_sq, s.k, observed, expected);
 }
 
-static void stats_chisq_gof_result(const ChiSqGofState &s, RealResult out) try {
+// chi_sq, df, p — p is null when df=0 (k=1 category).
+static void stats_chisq_gof_json_result(const ChiSqGofState &s, StringResult out) try {
   if (s.k == 0) { out.set_null(); return; }
-  out.set(s.chi_sq);
+  const double df = static_cast<double>(s.k - 1);
+
+  std::string json;
+  json.reserve(128);
+
+  auto append = [&](const char *key, double val) {
+    json += '"'; json += key; json += "\":";
+    json += fmt_no_exp(val);
+  };
+
+  json += '{';
+  append("chi_sq", s.chi_sq); json += ',';
+  append("df", df); json += ',';
+  json += "\"p\":";
+  json += (s.k > 1) ? fmt_no_exp(gammaq(df / 2.0, s.chi_sq / 2.0)) : "null";
+  json += '}';
+
+  out.set(json);
 } catch (...) { out.error("STATS_CHISQ_GOF: unexpected error"); }
 
-static void stats_chisq_gof_df_result(const ChiSqGofState &s, RealResult out) try {
-  if (s.k == 0) { out.set_null(); return; }
-  out.set(static_cast<double>(s.k - 1));
-} catch (...) { out.error("STATS_CHISQ_GOF_DF: unexpected error"); }
-
-// P(χ²_{k-1} > stat); returns NULL when df = 0 (k = 1).
-static void stats_chisq_gof_p_result(const ChiSqGofState &s, RealResult out) try {
-  if (s.k == 0 || s.k == 1) { out.set_null(); return; }
-  const double df = static_cast<double>(s.k - 1);
-  out.set(gammaq(df / 2.0, s.chi_sq / 2.0));
-} catch (...) { out.error("STATS_CHISQ_GOF_P: unexpected error"); }
-
-template<auto ResultFn>
-static constexpr auto make_chisq_gof_func(const char *name) {
-  return vsql::make_aggregate_func<ChiSqGofState, ResultFn>(name)
-    .returns(vsql::REAL)
+static constexpr auto make_chisq_gof_json_func(const char *name) {
+  return vsql::make_aggregate_func<ChiSqGofState, &stats_chisq_gof_json_result>(name)
+    .returns(vsql::STRING)
     .param(vsql::REAL)
     .param(vsql::REAL)
     .template clear<&chisq_gof_clear>()
@@ -722,26 +727,38 @@ static void chisq_indep_accumulate(ChiSqIndepState &s, RealArg observed,
   chisq_accumulate_cell(s.chi_sq, s.k, observed, expected);
 }
 
-// STATS_CHISQ_INDEP uses ChiSqGofState (same formula as GoF, no n_rows/n_cols needed).
-static void stats_chisq_indep_result(const ChiSqGofState &s, RealResult out) try {
+// chi_sq, df, p — df/p are null when n_rows/n_cols missing or df <= 0.
+static void stats_chisq_indep_json_result(const ChiSqIndepState &s, StringResult out) try {
   if (s.k == 0) { out.set_null(); return; }
-  out.set(s.chi_sq);
+
+  const bool has_dims = (s.n_rows > 0.0) && (s.n_cols > 0.0);
+  const double df = has_dims
+    ? (std::floor(s.n_rows) - 1.0) * (std::floor(s.n_cols) - 1.0)
+    : 0.0;
+
+  std::string json;
+  json.reserve(128);
+
+  auto append = [&](const char *key, double val) {
+    json += '"'; json += key; json += "\":";
+    json += fmt_no_exp(val);
+  };
+
+  json += '{';
+  append("chi_sq", s.chi_sq); json += ',';
+  json += "\"df\":";
+  json += has_dims ? fmt_no_exp(df) : "null";
+  json += ',';
+  json += "\"p\":";
+  json += (has_dims && df > 0.0) ? fmt_no_exp(gammaq(df / 2.0, s.chi_sq / 2.0)) : "null";
+  json += '}';
+
+  out.set(json);
 } catch (...) { out.error("STATS_CHISQ_INDEP: unexpected error"); }
 
-// P(χ²_{(r-1)(c-1)} > stat); returns NULL when no valid data, dimensions are
-// non-positive/NaN, or df <= 0.
-static void stats_chisq_indep_p_result(const ChiSqIndepState &s, RealResult out) try {
-  if (s.k == 0) { out.set_null(); return; }
-  if (!(s.n_rows > 0.0) || !(s.n_cols > 0.0)) { out.set_null(); return; }
-  const double df = (std::floor(s.n_rows) - 1.0) * (std::floor(s.n_cols) - 1.0);
-  if (!(df > 0.0)) { out.set_null(); return; }
-  out.set(gammaq(df / 2.0, s.chi_sq / 2.0));
-} catch (...) { out.error("STATS_CHISQ_INDEP_P: unexpected error"); }
-
-template<auto ResultFn>
-static constexpr auto make_chisq_indep_func(const char *name) {
-  return vsql::make_aggregate_func<ChiSqIndepState, ResultFn>(name)
-    .returns(vsql::REAL)
+static constexpr auto make_chisq_indep_json_func(const char *name) {
+  return vsql::make_aggregate_func<ChiSqIndepState, &stats_chisq_indep_json_result>(name)
+    .returns(vsql::STRING)
     .param(vsql::REAL)
     .param(vsql::REAL)
     .param(vsql::REAL)
@@ -1157,11 +1174,8 @@ VEF_GENERATE_ENTRY_POINTS(
     .func(make_ztest_func<&stats_ztest_z_result>("STATS_ZTEST_Z"))
     .func(make_ztest_func<&stats_ztest_p_one_tail_result>("STATS_ZTEST_P_ONE_TAIL"))
     .func(make_ztest_func<&stats_ztest_p_two_tail_result>("STATS_ZTEST_P_TWO_TAIL"))
-    .func(make_chisq_gof_func<&stats_chisq_gof_result>("STATS_CHISQ_GOF"))
-    .func(make_chisq_gof_func<&stats_chisq_gof_df_result>("STATS_CHISQ_GOF_DF"))
-    .func(make_chisq_gof_func<&stats_chisq_gof_p_result>("STATS_CHISQ_GOF_P"))
-    .func(make_chisq_gof_func<&stats_chisq_indep_result>("STATS_CHISQ_INDEP"))
-    .func(make_chisq_indep_func<&stats_chisq_indep_p_result>("STATS_CHISQ_INDEP_P"))
+    .func(make_chisq_gof_json_func("STATS_CHISQ_GOF"))
+    .func(make_chisq_indep_json_func("STATS_CHISQ_INDEP"))
     .func(make_kurt_func<&stats_kurtosis_result>("STATS_KURTOSIS"))
     .func(make_kurt_func<&stats_kurtosis_excess_result>("STATS_KURTOSIS_EXCESS"))
     .func(make_cov_func<&stats_cov_pop_result>("STATS_COVARIANCE_POP"))

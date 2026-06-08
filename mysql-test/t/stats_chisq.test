@@ -7,35 +7,27 @@ USE vsql_test;
 # Spec example: 4 categories O=[35,20,15,30] E=[25,25,25,25], chi_sq=10, df=3
 CREATE TABLE chisq_gof (observed DOUBLE, expected DOUBLE);
 INSERT INTO chisq_gof VALUES (35,25),(20,25),(15,25),(30,25);
-SELECT STATS_CHISQ_GOF(observed, expected)    AS chi_sq FROM chisq_gof;
-SELECT STATS_CHISQ_GOF_DF(observed, expected) AS df     FROM chisq_gof;
-SELECT ROUND(STATS_CHISQ_GOF_P(observed, expected), 4) AS p_value FROM chisq_gof;
-SELECT STATS_CHISQ_GOF_P(observed, expected) < 0.05 AS reject_null FROM chisq_gof;
+SELECT CAST(STATS_CHISQ_GOF(observed, expected) AS CHAR) AS gof FROM chisq_gof;
 DELETE FROM chisq_gof;
 
 # --- Perfect fit: observed equals expected — chi-squared must be zero ---
 INSERT INTO chisq_gof VALUES (25,25),(25,25),(25,25),(25,25);
-SELECT STATS_CHISQ_GOF(observed, expected) AS chi_sq FROM chisq_gof;
+SELECT CAST(STATS_CHISQ_GOF(observed, expected) AS CHAR) AS gof FROM chisq_gof;
 DELETE FROM chisq_gof;
 
-# --- Single category: df=0, p-value undefined (NULL) ---
+# --- Single category: df=0, p-value undefined (null) ---
 INSERT INTO chisq_gof VALUES (40,50);
-SELECT STATS_CHISQ_GOF(observed, expected)    AS chi_sq FROM chisq_gof;
-SELECT STATS_CHISQ_GOF_DF(observed, expected) AS df     FROM chisq_gof;
-SELECT STATS_CHISQ_GOF_P(observed, expected)  AS p_value FROM chisq_gof;
+SELECT CAST(STATS_CHISQ_GOF(observed, expected) AS CHAR) AS gof FROM chisq_gof;
 DELETE FROM chisq_gof;
 
-# --- All-NULL: all three GoF functions return NULL ---
+# --- All-NULL: returns NULL ---
 INSERT INTO chisq_gof VALUES (NULL,NULL),(NULL,NULL);
-SELECT STATS_CHISQ_GOF(observed, expected)    AS chi_sq FROM chisq_gof;
-SELECT STATS_CHISQ_GOF_DF(observed, expected) AS df     FROM chisq_gof;
-SELECT STATS_CHISQ_GOF_P(observed, expected)  AS p_value FROM chisq_gof;
+SELECT CAST(STATS_CHISQ_GOF(observed, expected) AS CHAR) AS gof FROM chisq_gof;
 DELETE FROM chisq_gof;
 
 # --- Expected <= 0: rows skipped, remaining rows still contribute ---
 INSERT INTO chisq_gof VALUES (35,25),(20,0),(15,25),(30,-5);
-SELECT STATS_CHISQ_GOF(observed, expected)    AS chi_sq FROM chisq_gof;
-SELECT STATS_CHISQ_GOF_DF(observed, expected) AS df     FROM chisq_gof;
+SELECT CAST(STATS_CHISQ_GOF(observed, expected) AS CHAR) AS gof FROM chisq_gof;
 DELETE FROM chisq_gof;
 
 DROP TABLE chisq_gof;
@@ -44,19 +36,22 @@ DROP TABLE chisq_gof;
 # Spec example: O=[60,40,20,80], E=[40,60,40,60], chi_sq≈33.33, df=(2-1)(2-1)=1
 CREATE TABLE chisq_indep (observed DOUBLE, expected DOUBLE);
 INSERT INTO chisq_indep VALUES (60,40),(40,60),(20,40),(80,60);
-SELECT ROUND(STATS_CHISQ_INDEP(observed, expected), 2)              AS chi_sq   FROM chisq_indep;
-SELECT STATS_CHISQ_INDEP_P(observed, expected, 2.0, 2.0) < 0.05    AS reject_null FROM chisq_indep;
+SELECT CAST(STATS_CHISQ_INDEP(observed, expected, 2.0, 2.0) AS CHAR) AS indep FROM chisq_indep;
 DELETE FROM chisq_indep;
 
 # --- Independence all-NULL: returns NULL ---
 INSERT INTO chisq_indep VALUES (NULL,NULL),(NULL,NULL);
-SELECT STATS_CHISQ_INDEP(observed, expected)             AS chi_sq  FROM chisq_indep;
-SELECT STATS_CHISQ_INDEP_P(observed, expected, 2.0, 2.0) AS p_value FROM chisq_indep;
+SELECT CAST(STATS_CHISQ_INDEP(observed, expected, 2.0, 2.0) AS CHAR) AS indep FROM chisq_indep;
 DELETE FROM chisq_indep;
 
-# --- Independence df=0 (n_rows=1 or n_cols=1): p-value is NULL ---
+# --- Independence df=0 (n_rows=1): p is null ---
 INSERT INTO chisq_indep VALUES (60,40),(40,60);
-SELECT STATS_CHISQ_INDEP_P(observed, expected, 1.0, 2.0) AS p_null FROM chisq_indep;
+SELECT CAST(STATS_CHISQ_INDEP(observed, expected, 1.0, 2.0) AS CHAR) AS indep FROM chisq_indep;
+DELETE FROM chisq_indep;
+
+# --- Independence: n_rows/n_cols not provided (0.0) → df/p are null ---
+INSERT INTO chisq_indep VALUES (60,40),(40,60),(20,40),(80,60);
+SELECT CAST(STATS_CHISQ_INDEP(observed, expected, 0.0, 0.0) AS CHAR) AS indep FROM chisq_indep;
 DELETE FROM chisq_indep;
 
 DROP TABLE chisq_indep;
@@ -67,8 +62,7 @@ INSERT INTO chisq_grouped VALUES
   (1, 35, 25),(1, 20, 25),(1, 15, 25),(1, 30, 25),
   (2, 25, 25),(2, 25, 25),(2, 25, 25),(2, 25, 25);
 SELECT grp,
-  STATS_CHISQ_GOF(observed, expected)    AS chi_sq,
-  STATS_CHISQ_GOF_DF(observed, expected) AS df
+  CAST(STATS_CHISQ_GOF(observed, expected) AS CHAR) AS gof
 FROM vsql_test.chisq_grouped
 GROUP BY grp
 ORDER BY grp;

@@ -7,18 +7,18 @@ Statistical aggregate functions for data scientists — IQR, quartiles, outlier 
 | Family | Count | Functions |
 |--------|------:|-----------|
 | **IQR** | 6 | `STATS_IQR`, `STATS_Q1`, `STATS_Q3`, `STATS_MEDIAN`, `STATS_IQR_LOWER_FENCE`, `STATS_IQR_UPPER_FENCE` |
-| **T-test** | 7 | `STATS_TTEST_T`, `STATS_TTEST_DF`, `STATS_TTEST_POOLED_VAR`, `STATS_TTEST_P_ONE_TAIL`, `STATS_TTEST_P_TWO_TAIL`, `STATS_TTEST_T_CRIT_ONE_TAIL`, `STATS_TTEST_T_CRIT_TWO_TAIL` |
+| **T-test** | 2 | `STATS_TTEST`, `STATS_TTEST_GROUPS` |
 | **Mode** | 3 | `STATS_MODE`, `STATS_MODE_MIN`, `STATS_MODE_MAX` |
 | **Skewness** | 2 | `STATS_SKEWNESS`, `STATS_SKEWNESS_PEARSON` |
 | **Z-test** | 3 | `STATS_ZTEST_Z`, `STATS_ZTEST_P_ONE_TAIL`, `STATS_ZTEST_P_TWO_TAIL` |
-| **Chi-squared** | 5 | `STATS_CHISQ_GOF`, `STATS_CHISQ_GOF_DF`, `STATS_CHISQ_GOF_P`, `STATS_CHISQ_INDEP`, `STATS_CHISQ_INDEP_P` |
+| **Chi-squared** | 2 | `STATS_CHISQ_GOF`, `STATS_CHISQ_INDEP` |
 | **Kurtosis** | 2 | `STATS_KURTOSIS`, `STATS_KURTOSIS_EXCESS` |
 | **Covariance** | 2 | `STATS_COVARIANCE_POP`, `STATS_COVARIANCE_SAMP` |
 | **Means** | 4 | `STATS_MEAN_TRIMMED`, `STATS_MEAN_WINSORIZED`, `STATS_MEAN_GEOMETRIC`, `STATS_MEAN_HARMONIC` |
 | **ANOVA** | 9 | `STATS_ANOVA_F`, `STATS_ANOVA_P`, `STATS_ANOVA_SSB`, `STATS_ANOVA_SSW`, `STATS_ANOVA_SST`, `STATS_ANOVA_MSB`, `STATS_ANOVA_MSW`, `STATS_ANOVA_DFB`, `STATS_ANOVA_DFW` |
-| **Total** | **43** | |
+| **Total** | **35** | |
 
-> **Beta notice:** All functions in this extension (`STATS_IQR`, `STATS_TTEST_*`, `STATS_MODE`, `STATS_SKEWNESS`, `STATS_ZTEST_*`, `STATS_CHISQ_*`, `STATS_KURTOSIS*`, `STATS_COVARIANCE_*`, `STATS_MEAN_*`, `STATS_ANOVA_*`) are beta quality. They are functionally correct on the tested datasets but have not been validated at production scale. Use with caution in high-volume or precision-critical workloads and report any anomalies.
+> **Beta notice:** All functions in this extension (`STATS_IQR`, `STATS_TTEST`, `STATS_TTEST_GROUPS`, `STATS_MODE`, `STATS_SKEWNESS`, `STATS_ZTEST_*`, `STATS_CHISQ_*`, `STATS_KURTOSIS*`, `STATS_COVARIANCE_*`, `STATS_MEAN_*`, `STATS_ANOVA_*`) are beta quality. They are functionally correct on the tested datasets but have not been validated at production scale. Use with caution in high-volume or precision-critical workloads and report any anomalies.
 
 
 ## Installing
@@ -48,10 +48,20 @@ FROM daily_sales
 GROUP BY region;
 
 -- Test whether two groups differ (group column holds 1 or 2)
+-- STATS_TTEST returns inference stats; STATS_TTEST_GROUPS returns per-group descriptives.
+-- Use CAST(... AS CHAR(1000)) + JSON_EXTRACT to read individual fields.
+WITH groups AS (
+  SELECT CAST(STATS_TTEST(value, grp, 0.05)   AS CHAR(1000)) AS ttest_json,
+         CAST(STATS_TTEST_GROUPS(value, grp)   AS CHAR(1000)) AS groups_json
+  FROM experiment_results
+)
 SELECT
-  STATS_TTEST_T(value, grp)          AS t_stat,
-  STATS_TTEST_P_TWO_TAIL(value, grp) AS p_value
-FROM experiment_results;
+  JSON_EXTRACT(groups_json, '$.mean_1')     AS mean_group1,
+  JSON_EXTRACT(groups_json, '$.mean_2')     AS mean_group2,
+  JSON_EXTRACT(ttest_json,  '$.t')          AS t_stat,
+  JSON_EXTRACT(ttest_json,  '$.p_two_tail') AS p_value,
+  IF(JSON_EXTRACT(ttest_json, '$.p_two_tail') < 0.05, 'Significant', 'Not Significant') AS result
+FROM groups;
 
 -- Find the most common value(s) in a column
 SELECT
@@ -88,17 +98,28 @@ SELECT STATS_MEAN_GEOMETRIC(growth_factor) AS avg_growth FROM quarterly_returns;
 SELECT STATS_MEAN_HARMONIC(speed_mph) AS avg_speed FROM journey_legs;
 
 -- Chi-squared goodness of fit: do observed counts match expected proportions?
+-- STATS_CHISQ_GOF returns JSON {chi_sq, df, p}; use CAST + JSON_EXTRACT to read fields.
+WITH gof AS (
+  SELECT CAST(STATS_CHISQ_GOF(observed, expected) AS CHAR(200)) AS json
+  FROM category_counts
+)
 SELECT
-  STATS_CHISQ_GOF(observed, expected)    AS chi_sq,
-  STATS_CHISQ_GOF_DF(observed, expected) AS df,
-  STATS_CHISQ_GOF_P(observed, expected)  AS p_value
-FROM category_counts;
+  JSON_EXTRACT(json, '$.chi_sq') AS chi_sq,
+  JSON_EXTRACT(json, '$.df')     AS df,
+  JSON_EXTRACT(json, '$.p')      AS p_value
+FROM gof;
 
 -- Chi-squared test of independence: are two categorical variables related?
+-- n_rows and n_cols are the contingency table dimensions (constants repeated per row).
+WITH indep AS (
+  SELECT CAST(STATS_CHISQ_INDEP(observed, expected, 2.0, 3.0) AS CHAR(200)) AS json
+  FROM contingency_table
+)
 SELECT
-  STATS_CHISQ_INDEP(observed, expected)              AS chi_sq,
-  STATS_CHISQ_INDEP_P(observed, expected, 2.0, 3.0)  AS p_value
-FROM contingency_table;
+  JSON_EXTRACT(json, '$.chi_sq') AS chi_sq,
+  JSON_EXTRACT(json, '$.df')     AS df,
+  JSON_EXTRACT(json, '$.p')      AS p_value
+FROM indep;
 
 -- One-way ANOVA: do three or more groups have the same population mean?
 SELECT
@@ -130,19 +151,44 @@ All IQR functions:
 
 ### Two-Sample t-Test Family (equal variances / pooled variance)
 
-The group column must contain the value `1` or `2`; other values are silently ignored.
+Both functions accept `(value, group)` where the group column identifies observations as belonging to group 1 or group 2. Other group values are silently ignored.
 
 | Function | Returns | Description |
 |---|---|---|
-| `STATS_TTEST_T(value, grp)` | `DOUBLE` | t-statistic |
-| `STATS_TTEST_DF(value, grp)` | `DOUBLE` | Degrees of freedom (n1 + n2 − 2) |
-| `STATS_TTEST_POOLED_VAR(value, grp)` | `DOUBLE` | Pooled variance |
-| `STATS_TTEST_P_ONE_TAIL(value, grp)` | `DOUBLE` | One-tail p-value |
-| `STATS_TTEST_P_TWO_TAIL(value, grp)` | `DOUBLE` | Two-tail p-value |
-| `STATS_TTEST_T_CRIT_ONE_TAIL(value, grp, alpha)` | `DOUBLE` | One-tail critical value at significance level alpha |
-| `STATS_TTEST_T_CRIT_TWO_TAIL(value, grp, alpha)` | `DOUBLE` | Two-tail critical value at significance level alpha |
+| `STATS_TTEST(value, grp, alpha)` | `STRING` | JSON object with inference statistics: `pooled_var`, `df`, `t`, `p_one_tail`, `t_crit_one_tail`, `p_two_tail`, `t_crit_two_tail` |
+| `STATS_TTEST_GROUPS(value, grp)` | `STRING` | JSON object with per-group descriptives: `mean_1`, `mean_2`, `variance_1`, `variance_2`, `n_1`, `n_2` |
 
-All t-test functions return NULL when either group has fewer than 2 non-NULL observations.
+`alpha` controls the significance level for critical values (pass `0.05` for 95% confidence). `t_crit_*` fields are `null` when alpha is outside (0, 1). Numeric values use fixed decimal notation — no scientific notation.
+
+Both functions return NULL when either group has fewer than 2 non-NULL observations.
+
+Because these functions return JSON strings, use `CAST(... AS CHAR(1000))` and `JSON_EXTRACT` to access individual fields:
+
+```sql
+WITH results AS (
+  SELECT
+    CAST(STATS_TTEST(value, grp, 0.05) AS CHAR(1000)) AS ttest_json,
+    CAST(STATS_TTEST_GROUPS(value, grp) AS CHAR(1000)) AS groups_json
+  FROM experiment_results
+)
+SELECT
+  JSON_EXTRACT(groups_json, '$.mean_1')          AS mean_group1,
+  JSON_EXTRACT(groups_json, '$.mean_2')          AS mean_group2,
+  JSON_EXTRACT(groups_json, '$.variance_1')      AS variance_group1,
+  JSON_EXTRACT(groups_json, '$.variance_2')      AS variance_group2,
+  JSON_EXTRACT(groups_json, '$.n_1')             AS n_group1,
+  JSON_EXTRACT(groups_json, '$.n_2')             AS n_group2,
+  JSON_EXTRACT(ttest_json,  '$.pooled_var')      AS pooled_variance,
+  JSON_EXTRACT(ttest_json,  '$.df')              AS degrees_of_freedom,
+  JSON_EXTRACT(ttest_json,  '$.t')               AS t_statistic,
+  JSON_EXTRACT(ttest_json,  '$.p_one_tail')      AS p_value_one_tail,
+  JSON_EXTRACT(ttest_json,  '$.t_crit_one_tail') AS t_critical_one_tail,
+  JSON_EXTRACT(ttest_json,  '$.p_two_tail')      AS p_value_two_tail,
+  JSON_EXTRACT(ttest_json,  '$.t_crit_two_tail') AS t_critical_two_tail
+FROM results;
+```
+
+See `examples/t_test_height.sql` and `examples/t_test_us_draft.sql` for complete worked examples.
 
 ### Mode Family
 
@@ -245,7 +291,7 @@ Both functions:
 
 ### Chi-Squared Family
 
-Two families of chi-squared functions share a common formula — χ² = Σ[(O − E)² / E] — applied to rows where expected > 0.
+Both functions share a common formula — χ² = Σ[(O − E)² / E] — and return a JSON STRING with fields `chi_sq`, `df`, and `p`. Use `CAST(... AS CHAR(200))` and `JSON_EXTRACT` to access individual fields.
 
 #### Goodness of Fit
 
@@ -253,9 +299,7 @@ Tests whether observed counts match expected proportions across k categories (df
 
 | Function | Returns | Description |
 |---|---|---|
-| `STATS_CHISQ_GOF(observed, expected)` | `DOUBLE` | Chi-squared statistic |
-| `STATS_CHISQ_GOF_DF(observed, expected)` | `DOUBLE` | Degrees of freedom: k − 1 |
-| `STATS_CHISQ_GOF_P(observed, expected)` | `DOUBLE` | P-value: P(χ²_{k-1} > stat) |
+| `STATS_CHISQ_GOF(observed, expected)` | `STRING` | JSON `{chi_sq, df, p}` — p is `null` when df = 0 (single category) |
 
 #### Test of Independence
 
@@ -263,16 +307,16 @@ Tests whether two categorical variables in a contingency table are independent (
 
 | Function | Returns | Description |
 |---|---|---|
-| `STATS_CHISQ_INDEP(observed, expected)` | `DOUBLE` | Chi-squared statistic |
-| `STATS_CHISQ_INDEP_P(observed, expected, n_rows, n_cols)` | `DOUBLE` | P-value: P(χ²_{(r-1)(c-1)} > stat) |
+| `STATS_CHISQ_INDEP(observed, expected, n_rows, n_cols)` | `STRING` | JSON `{chi_sq, df, p}` — df and p are `null` when dimensions are missing or df ≤ 0 |
 
-`n_rows` and `n_cols` are the number of rows and columns in the contingency table — pass them as constants repeated on every row.
+`n_rows` and `n_cols` are the contingency table dimensions — pass them as constants repeated on every row.
 
-All chi-squared functions:
+Both chi-squared functions:
 - Skip rows where `expected` is NULL, zero, or negative
 - Return NULL when no valid (observed, expected) pairs exist
-- Return NULL for `STATS_CHISQ_GOF_P` and `STATS_CHISQ_INDEP_P` when df ≤ 0
 - Work with `GROUP BY`, computing the statistic independently per group
+
+See `examples/chisq_support_tickets.sql` for a complete worked example.
 
 ### One-Way ANOVA Family
 
