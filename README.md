@@ -4,19 +4,18 @@ Statistical aggregate functions for data scientists — IQR, quartiles, outlier 
 
 ## Summary
 
-| Family | Count | Functions |
-|--------|------:|-----------|
-| **IQR** | 1 | `STATS_IQR` |
-| **T-test** | 2 | `STATS_TTEST`, `STATS_TTEST_GROUPS` |
-| **Mode** | 1 | `STATS_MODE` |
-| **Skewness** | 1 | `STATS_SKEWNESS` |
-| **Z-test** | 1 | `STATS_ZTEST` |
-| **Chi-squared** | 2 | `STATS_CHISQ_GOF`, `STATS_CHISQ_INDEP` |
-| **Kurtosis** | 1 | `STATS_KURTOSIS` |
-| **Covariance** | 1 | `STATS_COVARIANCE` |
-| **Means** | 1 | `STATS_MEAN` |
-| **ANOVA** | 1 | `STATS_ANOVA` |
-| **Total** | **12** | |
+| Family | Functions |
+|--------|-----------|
+| **IQR** | `STATS_IQR` |
+| **T-test** | `STATS_TTEST`, `STATS_TTEST_GROUPS` |
+| **Mode** | `STATS_MODE` |
+| **Skewness** | `STATS_SKEWNESS` |
+| **Z-test** | `STATS_ZTEST` |
+| **Chi-squared** | `STATS_CHISQ_GOF`, `STATS_CHISQ_INDEP` |
+| **Kurtosis** | `STATS_KURTOSIS` |
+| **Covariance** | `STATS_COVARIANCE` |
+| **Means** | `STATS_MEAN` |
+| **ANOVA** | `STATS_ANOVA` |
 
 > **Beta notice:** Functions in this extension (`STATS_IQR`, `STATS_TTEST`, `STATS_TTEST_GROUPS`, `STATS_MODE`, `STATS_SKEWNESS`, `STATS_ZTEST`, `STATS_CHISQ_*`, `STATS_KURTOSIS`, `STATS_COVARIANCE`, `STATS_MEAN`, `STATS_ANOVA`) are beta quality. They are functionally correct on the tested datasets but have not been validated at production scale. Use with caution in high-volume or precision-critical workloads and report any anomalies.
 
