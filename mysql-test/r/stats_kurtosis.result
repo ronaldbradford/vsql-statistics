@@ -3,51 +3,33 @@ CREATE DATABASE IF NOT EXISTS vsql_test;
 USE vsql_test;
 CREATE TABLE kurt_data (val DOUBLE);
 INSERT INTO kurt_data VALUES (10),(12),(15),(18),(20);
-SELECT ROUND(STATS_KURTOSIS(val), 4)        AS pop_kurtosis   FROM kurt_data;
-pop_kurtosis
-1.5268
-SELECT ROUND(STATS_KURTOSIS_EXCESS(val), 4) AS excess_kurtosis FROM kurt_data;
-excess_kurtosis
--1.8927
+SELECT CAST(STATS_KURTOSIS(val) AS CHAR) AS kurtosis FROM kurt_data;
+kurtosis
+{"kurtosis":1.52681660899654,"excess":-1.89273356401384}
 DELETE FROM kurt_data;
 INSERT INTO kurt_data VALUES (1),(2),(3),(4),(5);
-SELECT ROUND(STATS_KURTOSIS(val), 4)        AS pop_kurtosis   FROM kurt_data;
-pop_kurtosis
-1.7
-SELECT ROUND(STATS_KURTOSIS_EXCESS(val), 4) AS excess_kurtosis FROM kurt_data;
-excess_kurtosis
--1.2
+SELECT CAST(STATS_KURTOSIS(val) AS CHAR) AS kurtosis FROM kurt_data;
+kurtosis
+{"kurtosis":1.7,"excess":-1.2}
 DELETE FROM kurt_data;
 INSERT INTO kurt_data VALUES (1),(2),(3);
-SELECT ROUND(STATS_KURTOSIS(val), 4) AS pop_kurtosis_n3   FROM kurt_data;
-pop_kurtosis_n3
-1.5
-SELECT STATS_KURTOSIS_EXCESS(val)    AS excess_null_n3     FROM kurt_data;
-excess_null_n3
-NULL
+SELECT CAST(STATS_KURTOSIS(val) AS CHAR) AS kurtosis FROM kurt_data;
+kurtosis
+{"kurtosis":1.5,"excess":null}
 DELETE FROM kurt_data;
 INSERT INTO kurt_data VALUES (NULL),(NULL),(NULL);
-SELECT STATS_KURTOSIS(val)        AS kurtosis_null FROM kurt_data;
-kurtosis_null
-NULL
-SELECT STATS_KURTOSIS_EXCESS(val) AS excess_null   FROM kurt_data;
-excess_null
+SELECT CAST(STATS_KURTOSIS(val) AS CHAR) AS kurtosis FROM kurt_data;
+kurtosis
 NULL
 DELETE FROM kurt_data;
 INSERT INTO kurt_data VALUES (5),(5),(5),(5),(5);
-SELECT STATS_KURTOSIS(val)        AS kurtosis_const FROM kurt_data;
-kurtosis_const
-NULL
-SELECT STATS_KURTOSIS_EXCESS(val) AS excess_const   FROM kurt_data;
-excess_const
-NULL
+SELECT CAST(STATS_KURTOSIS(val) AS CHAR) AS kurtosis FROM kurt_data;
+kurtosis
+{"kurtosis":null,"excess":null}
 DELETE FROM kurt_data;
 INSERT INTO kurt_data VALUES (42);
-SELECT STATS_KURTOSIS(val)        AS kurtosis_single FROM kurt_data;
-kurtosis_single
-NULL
-SELECT STATS_KURTOSIS_EXCESS(val) AS excess_single   FROM kurt_data;
-excess_single
+SELECT CAST(STATS_KURTOSIS(val) AS CHAR) AS kurtosis FROM kurt_data;
+kurtosis
 NULL
 DROP TABLE kurt_data;
 CREATE TABLE vsql_test.kurt_grouped (grp INT, val DOUBLE);
@@ -55,14 +37,13 @@ INSERT INTO kurt_grouped VALUES
 (1, 10),(1, 12),(1, 15),(1, 18),(1, 20),
 (2,  1),(2,  2),(2,  3),(2,  4),(2,  5);
 SELECT grp,
-ROUND(STATS_KURTOSIS(val), 4)        AS pop_kurtosis,
-ROUND(STATS_KURTOSIS_EXCESS(val), 4) AS excess_kurtosis
+CAST(STATS_KURTOSIS(val) AS CHAR) AS kurtosis
 FROM vsql_test.kurt_grouped
 GROUP BY grp
 ORDER BY grp;
-grp	pop_kurtosis	excess_kurtosis
-1	1.5268	-1.8927
-2	1.7	-1.2
+grp	kurtosis
+1	{"kurtosis":1.52681660899654,"excess":-1.89273356401384}
+2	{"kurtosis":1.7,"excess":-1.2}
 DROP TABLE vsql_test.kurt_grouped;
 DROP DATABASE vsql_test;
 UNINSTALL EXTENSION vsql_statistics;

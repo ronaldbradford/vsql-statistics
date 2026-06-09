@@ -797,32 +797,41 @@ static std::optional<KurtMoments> compute_kurt_moments(const KurtState &s) {
   return KurtMoments{ssq2, ssq4};
 }
 
-// Population kurtosis β₂ = μ₄/m₂² where μ₄ = Σ(xi−μ)⁴/n, m₂ = Σ(xi−μ)²/n.
-// Returns NULL for n < 2 or zero variance.
-static void stats_kurtosis_result(const KurtState &s, RealResult out) try {
+// kurtosis: β₂ = μ₄/m₂² (population, n≥2). excess: g₂ Fisher-Pearson (n≥4).
+// kurtosis/excess both null when variance is zero; excess null when n < 4.
+// Whole result is null when n < 2.
+static void stats_kurtosis_json_result(const KurtState &s, StringResult out) try {
   if (s.n < 2) { out.set_null(); return; }
+
   const auto km = compute_kurt_moments(s);
-  if (!km) { out.set_null(); return; }
-  out.set(km->ssq4 * static_cast<double>(s.n) / (km->ssq2 * km->ssq2));
+  const double n = static_cast<double>(s.n);
+
+  std::string json;
+  json.reserve(128);
+  json += '{';
+  json += "\"kurtosis\":";
+
+  if (!km) {
+    json += "null,\"excess\":null";
+  } else {
+    const double beta2 = km->ssq4 * n / (km->ssq2 * km->ssq2);
+    json += fmt_no_exp(beta2);
+    json += ",\"excess\":";
+    if (s.n < 4) {
+      json += "null";
+    } else {
+      const double a = (n - 1.0) / ((n - 2.0) * (n - 3.0));
+      json += fmt_no_exp(a * (n * (n + 1.0) * km->ssq4 / (km->ssq2 * km->ssq2) - 3.0 * (n - 1.0)));
+    }
+  }
+
+  json += '}';
+  out.set(json);
 } catch (...) { out.error("STATS_KURTOSIS: unexpected error"); }
 
-// Fisher-Pearson sample excess kurtosis g₂ (unbiased estimator):
-// g₂ = [n(n+1)/((n−1)(n−2)(n−3))] × Σ[(xi−x̄)⁴/s⁴] − [3(n−1)²/((n−2)(n−3))]
-// Equivalently: g₂ = (n−1)/((n−2)(n−3)) × [n(n+1)·Σ(xi−x̄)⁴/Σ(xi−x̄)² − 3(n−1)]
-// Returns NULL for n < 4 or zero variance.
-static void stats_kurtosis_excess_result(const KurtState &s, RealResult out) try {
-  if (s.n < 4) { out.set_null(); return; }
-  const auto km = compute_kurt_moments(s);
-  if (!km) { out.set_null(); return; }
-  const double n = static_cast<double>(s.n);
-  const double a = (n - 1.0) / ((n - 2.0) * (n - 3.0));
-  out.set(a * (n * (n + 1.0) * km->ssq4 / (km->ssq2 * km->ssq2) - 3.0 * (n - 1.0)));
-} catch (...) { out.error("STATS_KURTOSIS_EXCESS: unexpected error"); }
-
-template<auto ResultFn>
-static constexpr auto make_kurt_func(const char *name) {
-  return vsql::make_aggregate_func<KurtState, ResultFn>(name)
-    .returns(vsql::REAL)
+static constexpr auto make_kurtosis_json_func(const char *name) {
+  return vsql::make_aggregate_func<KurtState, &stats_kurtosis_json_result>(name)
+    .returns(vsql::STRING)
     .param(vsql::REAL)
     .template clear<&kurt_clear>()
     .template accumulate<&kurt_accumulate>()
@@ -1163,8 +1172,7 @@ VEF_GENERATE_ENTRY_POINTS(
     .func(make_ztest_func<&stats_ztest_p_two_tail_result>("STATS_ZTEST_P_TWO_TAIL"))
     .func(make_chisq_gof_json_func("STATS_CHISQ_GOF"))
     .func(make_chisq_indep_json_func("STATS_CHISQ_INDEP"))
-    .func(make_kurt_func<&stats_kurtosis_result>("STATS_KURTOSIS"))
-    .func(make_kurt_func<&stats_kurtosis_excess_result>("STATS_KURTOSIS_EXCESS"))
+    .func(make_kurtosis_json_func("STATS_KURTOSIS"))
     .func(make_cov_func<&stats_cov_pop_result>("STATS_COVARIANCE_POP"))
     .func(make_cov_func<&stats_cov_samp_result>("STATS_COVARIANCE_SAMP"))
     .func(make_mean_trim_func<&stats_mean_trimmed_result>("STATS_MEAN_TRIMMED"))

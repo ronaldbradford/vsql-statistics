@@ -12,13 +12,13 @@ Statistical aggregate functions for data scientists — IQR, quartiles, outlier 
 | **Skewness** | 1 | `STATS_SKEWNESS` |
 | **Z-test** | 3 | `STATS_ZTEST_Z`, `STATS_ZTEST_P_ONE_TAIL`, `STATS_ZTEST_P_TWO_TAIL` |
 | **Chi-squared** | 2 | `STATS_CHISQ_GOF`, `STATS_CHISQ_INDEP` |
-| **Kurtosis** | 2 | `STATS_KURTOSIS`, `STATS_KURTOSIS_EXCESS` |
+| **Kurtosis** | 1 | `STATS_KURTOSIS` |
 | **Covariance** | 2 | `STATS_COVARIANCE_POP`, `STATS_COVARIANCE_SAMP` |
 | **Means** | 4 | `STATS_MEAN_TRIMMED`, `STATS_MEAN_WINSORIZED`, `STATS_MEAN_GEOMETRIC`, `STATS_MEAN_HARMONIC` |
 | **ANOVA** | 9 | `STATS_ANOVA_F`, `STATS_ANOVA_P`, `STATS_ANOVA_SSB`, `STATS_ANOVA_SSW`, `STATS_ANOVA_SST`, `STATS_ANOVA_MSB`, `STATS_ANOVA_MSW`, `STATS_ANOVA_DFB`, `STATS_ANOVA_DFW` |
-| **Total** | **34** | |
+| **Total** | **33** | |
 
-> **Beta notice:** All functions in this extension (`STATS_IQR`, `STATS_TTEST`, `STATS_TTEST_GROUPS`, `STATS_MODE`, `STATS_SKEWNESS`, `STATS_ZTEST_*`, `STATS_CHISQ_*`, `STATS_KURTOSIS*`, `STATS_COVARIANCE_*`, `STATS_MEAN_*`, `STATS_ANOVA_*`) are beta quality. They are functionally correct on the tested datasets but have not been validated at production scale. Use with caution in high-volume or precision-critical workloads and report any anomalies.
+> **Beta notice:** All functions in this extension (`STATS_IQR`, `STATS_TTEST`, `STATS_TTEST_GROUPS`, `STATS_MODE`, `STATS_SKEWNESS`, `STATS_ZTEST_*`, `STATS_CHISQ_*`, `STATS_KURTOSIS`, `STATS_COVARIANCE_*`, `STATS_MEAN_*`, `STATS_ANOVA_*`) are beta quality. They are functionally correct on the tested datasets but have not been validated at production scale. Use with caution in high-volume or precision-critical workloads and report any anomalies.
 
 
 ## Installing
@@ -82,11 +82,11 @@ SELECT
   STATS_ZTEST_P_TWO_TAIL(measurement, 500.0, 40.0)   AS p_value
 FROM quality_checks;
 
--- Kurtosis: measure tail heaviness of a distribution
-SELECT
-  STATS_KURTOSIS(return_pct)        AS pop_kurtosis,
-  STATS_KURTOSIS_EXCESS(return_pct) AS excess_kurtosis
-FROM asset_returns;
+-- Kurtosis: measure tail heaviness (kurtosis=β₂, excess=g₂ Fisher-Pearson)
+WITH k AS (SELECT CAST(STATS_KURTOSIS(return_pct) AS CHAR(200)) AS json FROM asset_returns)
+SELECT JSON_EXTRACT(json, '$.kurtosis') AS pop_kurtosis,
+       JSON_EXTRACT(json, '$.excess')   AS excess_kurtosis
+FROM k;
 
 -- Trimmed mean: reduce outlier influence by discarding extremes
 SELECT STATS_MEAN_TRIMMED(sale_amount, 0.1) AS robust_mean FROM daily_sales;
@@ -228,18 +228,17 @@ All z-test functions:
 
 | Function | Returns | Description |
 |---|---|---|
-| `STATS_KURTOSIS(col)` | `DOUBLE` | Population kurtosis β₂ = μ₄/σ⁴ (normal distribution = 3) |
-| `STATS_KURTOSIS_EXCESS(col)` | `DOUBLE` | Fisher-Pearson sample excess kurtosis g₂ = β₂ − 3 (unbiased; normal distribution = 0) |
+| `STATS_KURTOSIS(col)` | `STRING` | JSON `{"kurtosis": ..., "excess": ...}` — `excess` is null when n < 4; both null when variance is zero |
 
-Both kurtosis functions:
-- Use a streaming accumulator — O(1) memory regardless of group size
-- Skip NULL values; return NULL for an all-NULL group
-- Return NULL when all values are equal (zero variance)
-- Work with `GROUP BY`
+`kurtosis` is the population kurtosis β₂ = μ₄/σ⁴. `excess` is the Fisher-Pearson unbiased sample excess kurtosis g₂ (denominator contains (n−2)(n−3), so requires n ≥ 4).
 
-`STATS_KURTOSIS` requires n ≥ 2. `STATS_KURTOSIS_EXCESS` requires n ≥ 4 (the unbiased correction factor has (n−2)(n−3) in the denominator).
+`STATS_KURTOSIS`:
+- Uses a streaming accumulator — O(1) memory regardless of group size
+- Skips NULL values; returns NULL for an all-NULL group or a single-row group
+- Returns `{"kurtosis":null,"excess":null}` when all values are equal (zero variance)
+- Works with `GROUP BY`
 
-Interpretation of excess kurtosis: zero = normal (mesokurtic); positive = heavy-tailed (leptokurtic); negative = light-tailed (platykurtic).
+Interpretation: normal distribution has β₂ = 3 and g₂ = 0. Positive excess = heavy-tailed (leptokurtic); negative = light-tailed (platykurtic).
 
 ### Covariance Family
 

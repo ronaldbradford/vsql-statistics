@@ -4,43 +4,36 @@ CREATE DATABASE IF NOT EXISTS vsql_test;
 USE vsql_test;
 
 # --- Spec worked example: X={10,12,15,18,20}, n=5 ---
-# Population kurtosis β₂ = Σ(xi-μ)⁴/n / (Σ(xi-μ)²/n)² = 7060/4624 ≈ 1.5268
-# Sample excess kurtosis g₂ ≈ -1.8927 (platykurtic — thin-tailed)
+# kurtosis β₂ ≈ 1.5268, excess g₂ ≈ -1.8927 (platykurtic)
 CREATE TABLE kurt_data (val DOUBLE);
 INSERT INTO kurt_data VALUES (10),(12),(15),(18),(20);
-SELECT ROUND(STATS_KURTOSIS(val), 4)        AS pop_kurtosis   FROM kurt_data;
-SELECT ROUND(STATS_KURTOSIS_EXCESS(val), 4) AS excess_kurtosis FROM kurt_data;
+SELECT CAST(STATS_KURTOSIS(val) AS CHAR) AS kurtosis FROM kurt_data;
 
-# --- Symmetric uniform-spaced data: both functions computable ---
-# {1,2,3,4,5}: β₂ = (34/5)/(10/5)² = 6.8/4 = 1.7
+# --- Symmetric uniform-spaced data: {1,2,3,4,5} ---
+# β₂ = (34/5)/(10/5)² = 1.7, excess g₂ ≈ -1.2
 DELETE FROM kurt_data;
 INSERT INTO kurt_data VALUES (1),(2),(3),(4),(5);
-SELECT ROUND(STATS_KURTOSIS(val), 4)        AS pop_kurtosis   FROM kurt_data;
-SELECT ROUND(STATS_KURTOSIS_EXCESS(val), 4) AS excess_kurtosis FROM kurt_data;
+SELECT CAST(STATS_KURTOSIS(val) AS CHAR) AS kurtosis FROM kurt_data;
 
-# --- Three-value group: kurtosis defined (n≥2), excess kurtosis NULL (n<4) ---
+# --- Three-value group: kurtosis defined (n≥2), excess null (n<4) ---
 DELETE FROM kurt_data;
 INSERT INTO kurt_data VALUES (1),(2),(3);
-SELECT ROUND(STATS_KURTOSIS(val), 4) AS pop_kurtosis_n3   FROM kurt_data;
-SELECT STATS_KURTOSIS_EXCESS(val)    AS excess_null_n3     FROM kurt_data;
+SELECT CAST(STATS_KURTOSIS(val) AS CHAR) AS kurtosis FROM kurt_data;
 
-# --- All-NULL group: both functions return NULL ---
+# --- All-NULL group: returns NULL ---
 DELETE FROM kurt_data;
 INSERT INTO kurt_data VALUES (NULL),(NULL),(NULL);
-SELECT STATS_KURTOSIS(val)        AS kurtosis_null FROM kurt_data;
-SELECT STATS_KURTOSIS_EXCESS(val) AS excess_null   FROM kurt_data;
+SELECT CAST(STATS_KURTOSIS(val) AS CHAR) AS kurtosis FROM kurt_data;
 
-# --- All-equal values: zero variance, both functions return NULL ---
+# --- All-equal values: zero variance, both fields null ---
 DELETE FROM kurt_data;
 INSERT INTO kurt_data VALUES (5),(5),(5),(5),(5);
-SELECT STATS_KURTOSIS(val)        AS kurtosis_const FROM kurt_data;
-SELECT STATS_KURTOSIS_EXCESS(val) AS excess_const   FROM kurt_data;
+SELECT CAST(STATS_KURTOSIS(val) AS CHAR) AS kurtosis FROM kurt_data;
 
-# --- Single-row group: both return NULL ---
+# --- Single-row group: returns NULL ---
 DELETE FROM kurt_data;
 INSERT INTO kurt_data VALUES (42);
-SELECT STATS_KURTOSIS(val)        AS kurtosis_single FROM kurt_data;
-SELECT STATS_KURTOSIS_EXCESS(val) AS excess_single   FROM kurt_data;
+SELECT CAST(STATS_KURTOSIS(val) AS CHAR) AS kurtosis FROM kurt_data;
 
 DROP TABLE kurt_data;
 
@@ -50,8 +43,7 @@ INSERT INTO kurt_grouped VALUES
   (1, 10),(1, 12),(1, 15),(1, 18),(1, 20),
   (2,  1),(2,  2),(2,  3),(2,  4),(2,  5);
 SELECT grp,
-  ROUND(STATS_KURTOSIS(val), 4)        AS pop_kurtosis,
-  ROUND(STATS_KURTOSIS_EXCESS(val), 4) AS excess_kurtosis
+  CAST(STATS_KURTOSIS(val) AS CHAR) AS kurtosis
 FROM vsql_test.kurt_grouped
 GROUP BY grp
 ORDER BY grp;

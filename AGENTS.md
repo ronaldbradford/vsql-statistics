@@ -14,7 +14,7 @@ This file provides guidance to AI coding assistants when working with code in th
 - **Skewness family (1 JSON function):** `STATS_SKEWNESS`
 - **Z-test family (3 functions):** `STATS_ZTEST_Z`, `STATS_ZTEST_P_ONE_TAIL`, `STATS_ZTEST_P_TWO_TAIL`
 - **Chi-squared family (2 JSON functions):** `STATS_CHISQ_GOF`, `STATS_CHISQ_INDEP`
-- **Kurtosis family (2 functions):** `STATS_KURTOSIS`, `STATS_KURTOSIS_EXCESS`
+- **Kurtosis family (1 JSON function):** `STATS_KURTOSIS`
 - **Covariance family (2 functions):** `STATS_COVARIANCE_POP`, `STATS_COVARIANCE_SAMP`
 - **Means family — beta (4 functions):** `STATS_MEAN_TRIMMED`, `STATS_MEAN_WINSORIZED`, `STATS_MEAN_GEOMETRIC`, `STATS_MEAN_HARMONIC`
 
@@ -53,7 +53,7 @@ The skewness family (1 JSON function) uses `StatsState` (vector of doubles). `ST
 
 The z-test family (3 functions) uses `ZTestState` — streaming accumulator of n and Σx, plus stored `mu` and `sigma` constants (last non-null wins per row; sigma defaults to 0.0 so all-null sigma returns NULL). `STATS_ZTEST_P_ONE_TAIL` returns the upper-tail probability P(Z > z), which is > 0.5 when the sample mean is below μ. All three return NULL when n=0, sigma≤0, or sigma is NaN.
 
-The kurtosis family (2 functions) uses `KurtState` — a streaming accumulator of n, Σ(xi−ref), Σ(xi−ref)², Σ(xi−ref)³, Σ(xi−ref)⁴ (shifted by the first observed value for numerical stability). `STATS_KURTOSIS` returns the population kurtosis β₂ = Σ(xi−μ)⁴/n / (Σ(xi−μ)²/n)² and requires n ≥ 2. `STATS_KURTOSIS_EXCESS` returns the Fisher-Pearson unbiased sample excess kurtosis g₂ and requires n ≥ 4 (the denominator contains (n−2)(n−3)). Both return NULL for zero variance (all values equal). A normal distribution has β₂ = 3 and g₂ = 0.
+The kurtosis family (1 JSON function) uses `KurtState` — a streaming accumulator of n, Σ(xi−ref), Σ(xi−ref)², Σ(xi−ref)³, Σ(xi−ref)⁴ (shifted by the first observed value for numerical stability). `STATS_KURTOSIS(col)` returns a JSON STRING `{"kurtosis": ..., "excess": ...}` where `kurtosis` is β₂ (n ≥ 2) and `excess` is the Fisher-Pearson unbiased g₂ (n ≥ 4; null when n < 4). Both fields are null for zero variance. The function returns NULL when n < 2. A normal distribution has β₂ = 3 and g₂ = 0.
 
 The means family (4 functions — beta) uses three states. `MeanTrimState` (vector + trim_pct) serves both `STATS_MEAN_TRIMMED` and `STATS_MEAN_WINSORIZED` (2-param functions). `MeanGeoState` (n, sum_log) is a streaming accumulator for `STATS_MEAN_GEOMETRIC`: accumulates Σln(xi) for positive values, then returns exp(sum_log/n). `MeanHarmState` (n, sum_recip) is a streaming accumulator for `STATS_MEAN_HARMONIC`: accumulates Σ(1/xi) for positive values, then returns n/sum_recip. Non-positive inputs are silently skipped for both geometric and harmonic.
 
@@ -71,7 +71,7 @@ The covariance family (2 functions) uses `CovState` — a streaming accumulator 
 **Function registration:** `make_aggregate_func<StatsState, &result_fn>(name).returns(REAL).param(REAL).clear<&stats_clear>().accumulate<&stats_accumulate>().build()`
 
 **Key files:**
-- `src/vsql_statistics.cc` — all 32 aggregate functions (6 IQR + 2 t-test + 3 mode + 1 skewness + 3 z-test + 2 chi-squared + 2 kurtosis + 2 covariance + 4 means + 9 ANOVA)
+- `src/vsql_statistics.cc` — all 31 aggregate functions (6 IQR + 2 t-test + 3 mode + 1 skewness + 3 z-test + 2 chi-squared + 1 kurtosis + 2 covariance + 4 means + 9 ANOVA)
 - `manifest.json` — extension metadata
 - `CMakeLists.txt` — build configuration
 - `cmake/FindVillageSQL.cmake` — SDK discovery
