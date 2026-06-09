@@ -4,42 +4,32 @@ INSTALL EXTENSION vsql_statistics;
 
 CREATE TABLE mode_data (val INT NOT NULL);
 
---echo # --- Unimodal: value 15 appears 3 times, all others fewer ---
+--echo # --- Unimodal: value 15 appears 3 times ---
 INSERT INTO mode_data VALUES (12),(15),(12),(18),(21),(15),(15),(14);
-SELECT STATS_MODE(CAST(val AS DOUBLE))     AS mode_all FROM mode_data;
-SELECT STATS_MODE_MIN(CAST(val AS DOUBLE)) AS mode_min FROM mode_data;
-SELECT STATS_MODE_MAX(CAST(val AS DOUBLE)) AS mode_max FROM mode_data;
+SELECT CAST(STATS_MODE(CAST(val AS DOUBLE)) AS CHAR) AS mode FROM mode_data;
 DELETE FROM mode_data;
 
---echo # --- Bimodal: 24 and 29 each appear twice; array sorted ascending ---
+--echo # --- Bimodal: 24 and 29 each appear twice; values sorted ascending ---
 INSERT INTO mode_data VALUES (24),(29),(24),(35),(42),(29),(38),(22);
-SELECT STATS_MODE(CAST(val AS DOUBLE))     AS mode_all FROM mode_data;
-SELECT STATS_MODE_MIN(CAST(val AS DOUBLE)) AS mode_min FROM mode_data;
-SELECT STATS_MODE_MAX(CAST(val AS DOUBLE)) AS mode_max FROM mode_data;
+SELECT CAST(STATS_MODE(CAST(val AS DOUBLE)) AS CHAR) AS mode FROM mode_data;
 DELETE FROM mode_data;
 
---echo # --- All-unique values: no value repeats, all three functions return NULL ---
+--echo # --- All-unique values: no value repeats, returns NULL ---
 INSERT INTO mode_data VALUES (1),(2),(3),(4);
-SELECT STATS_MODE(CAST(val AS DOUBLE))     AS mode_all FROM mode_data;
-SELECT STATS_MODE_MIN(CAST(val AS DOUBLE)) AS mode_min FROM mode_data;
-SELECT STATS_MODE_MAX(CAST(val AS DOUBLE)) AS mode_max FROM mode_data;
+SELECT CAST(STATS_MODE(CAST(val AS DOUBLE)) AS CHAR) AS mode FROM mode_data;
 DELETE FROM mode_data;
 
---echo # --- Single row: no value repeats, all three functions return NULL ---
+--echo # --- Single row: no value repeats, returns NULL ---
 INSERT INTO mode_data VALUES (42);
-SELECT STATS_MODE(CAST(val AS DOUBLE))     AS mode_all FROM mode_data;
-SELECT STATS_MODE_MIN(CAST(val AS DOUBLE)) AS mode_min FROM mode_data;
-SELECT STATS_MODE_MAX(CAST(val AS DOUBLE)) AS mode_max FROM mode_data;
+SELECT CAST(STATS_MODE(CAST(val AS DOUBLE)) AS CHAR) AS mode FROM mode_data;
 DELETE FROM mode_data;
 
 DROP TABLE mode_data;
 
---echo # --- All-NULL column: all three functions return NULL ---
+--echo # --- All-NULL column: returns NULL ---
 CREATE TABLE mode_nulls (val DOUBLE);
 INSERT INTO mode_nulls VALUES (NULL),(NULL),(NULL);
-SELECT STATS_MODE(val)     AS mode_all FROM mode_nulls;
-SELECT STATS_MODE_MIN(val) AS mode_min FROM mode_nulls;
-SELECT STATS_MODE_MAX(val) AS mode_max FROM mode_nulls;
+SELECT CAST(STATS_MODE(val) AS CHAR) AS mode FROM mode_nulls;
 DROP TABLE mode_nulls;
 
 --echo # --- GROUP BY: mode computed independently per group ---
@@ -48,9 +38,7 @@ INSERT INTO mode_grouped VALUES
   (1,10),(1,20),(1,10),
   (2,30),(2,40),(2,40),(2,40);
 SELECT grp,
-       STATS_MODE(CAST(val AS DOUBLE))     AS mode_all,
-       STATS_MODE_MIN(CAST(val AS DOUBLE)) AS mode_min,
-       STATS_MODE_MAX(CAST(val AS DOUBLE)) AS mode_max
+       CAST(STATS_MODE(CAST(val AS DOUBLE)) AS CHAR) AS mode
 FROM mode_grouped
 GROUP BY grp
 ORDER BY grp;

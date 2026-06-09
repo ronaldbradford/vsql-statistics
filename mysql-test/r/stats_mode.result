@@ -1,66 +1,36 @@
 # vsql_statistics: mode aggregate functions
 INSTALL EXTENSION vsql_statistics;
 CREATE TABLE mode_data (val INT NOT NULL);
-# --- Unimodal: value 15 appears 3 times, all others fewer ---
+# --- Unimodal: value 15 appears 3 times ---
 INSERT INTO mode_data VALUES (12),(15),(12),(18),(21),(15),(15),(14);
-SELECT STATS_MODE(CAST(val AS DOUBLE))     AS mode_all FROM mode_data;
-mode_all
-[15]
-SELECT STATS_MODE_MIN(CAST(val AS DOUBLE)) AS mode_min FROM mode_data;
-mode_min
-15
-SELECT STATS_MODE_MAX(CAST(val AS DOUBLE)) AS mode_max FROM mode_data;
-mode_max
-15
+SELECT CAST(STATS_MODE(CAST(val AS DOUBLE)) AS CHAR) AS mode FROM mode_data;
+mode
+{"values":[15],"min":15,"max":15}
 DELETE FROM mode_data;
-# --- Bimodal: 24 and 29 each appear twice; array sorted ascending ---
+# --- Bimodal: 24 and 29 each appear twice; values sorted ascending ---
 INSERT INTO mode_data VALUES (24),(29),(24),(35),(42),(29),(38),(22);
-SELECT STATS_MODE(CAST(val AS DOUBLE))     AS mode_all FROM mode_data;
-mode_all
-[24, 29]
-SELECT STATS_MODE_MIN(CAST(val AS DOUBLE)) AS mode_min FROM mode_data;
-mode_min
-24
-SELECT STATS_MODE_MAX(CAST(val AS DOUBLE)) AS mode_max FROM mode_data;
-mode_max
-29
+SELECT CAST(STATS_MODE(CAST(val AS DOUBLE)) AS CHAR) AS mode FROM mode_data;
+mode
+{"values":[24,29],"min":24,"max":29}
 DELETE FROM mode_data;
-# --- All-unique values: no value repeats, all three functions return NULL ---
+# --- All-unique values: no value repeats, returns NULL ---
 INSERT INTO mode_data VALUES (1),(2),(3),(4);
-SELECT STATS_MODE(CAST(val AS DOUBLE))     AS mode_all FROM mode_data;
-mode_all
-NULL
-SELECT STATS_MODE_MIN(CAST(val AS DOUBLE)) AS mode_min FROM mode_data;
-mode_min
-NULL
-SELECT STATS_MODE_MAX(CAST(val AS DOUBLE)) AS mode_max FROM mode_data;
-mode_max
+SELECT CAST(STATS_MODE(CAST(val AS DOUBLE)) AS CHAR) AS mode FROM mode_data;
+mode
 NULL
 DELETE FROM mode_data;
-# --- Single row: no value repeats, all three functions return NULL ---
+# --- Single row: no value repeats, returns NULL ---
 INSERT INTO mode_data VALUES (42);
-SELECT STATS_MODE(CAST(val AS DOUBLE))     AS mode_all FROM mode_data;
-mode_all
-NULL
-SELECT STATS_MODE_MIN(CAST(val AS DOUBLE)) AS mode_min FROM mode_data;
-mode_min
-NULL
-SELECT STATS_MODE_MAX(CAST(val AS DOUBLE)) AS mode_max FROM mode_data;
-mode_max
+SELECT CAST(STATS_MODE(CAST(val AS DOUBLE)) AS CHAR) AS mode FROM mode_data;
+mode
 NULL
 DELETE FROM mode_data;
 DROP TABLE mode_data;
-# --- All-NULL column: all three functions return NULL ---
+# --- All-NULL column: returns NULL ---
 CREATE TABLE mode_nulls (val DOUBLE);
 INSERT INTO mode_nulls VALUES (NULL),(NULL),(NULL);
-SELECT STATS_MODE(val)     AS mode_all FROM mode_nulls;
-mode_all
-NULL
-SELECT STATS_MODE_MIN(val) AS mode_min FROM mode_nulls;
-mode_min
-NULL
-SELECT STATS_MODE_MAX(val) AS mode_max FROM mode_nulls;
-mode_max
+SELECT CAST(STATS_MODE(val) AS CHAR) AS mode FROM mode_nulls;
+mode
 NULL
 DROP TABLE mode_nulls;
 # --- GROUP BY: mode computed independently per group ---
@@ -69,14 +39,12 @@ INSERT INTO mode_grouped VALUES
 (1,10),(1,20),(1,10),
 (2,30),(2,40),(2,40),(2,40);
 SELECT grp,
-STATS_MODE(CAST(val AS DOUBLE))     AS mode_all,
-STATS_MODE_MIN(CAST(val AS DOUBLE)) AS mode_min,
-STATS_MODE_MAX(CAST(val AS DOUBLE)) AS mode_max
+CAST(STATS_MODE(CAST(val AS DOUBLE)) AS CHAR) AS mode
 FROM mode_grouped
 GROUP BY grp
 ORDER BY grp;
-grp	mode_all	mode_min	mode_max
-1	[10]	10	10
-2	[40]	40	40
+grp	mode
+1	{"values":[10],"min":10,"max":10}
+2	{"values":[40],"min":40,"max":40}
 DROP TABLE mode_grouped;
 UNINSTALL EXTENSION vsql_statistics;

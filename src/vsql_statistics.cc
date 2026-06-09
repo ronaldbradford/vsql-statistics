@@ -406,67 +406,29 @@ static std::vector<double> compute_modes(const ModeState &s) {
   return modes;
 }
 
-static void stats_mode_result(const ModeState &s, StringResult out) try {
+// values: sorted array of all mode values. min/max: first and last for convenience.
+// NULL when no value repeats (max frequency == 1) or all inputs are NULL/NaN.
+static void stats_mode_json_result(const ModeState &s, StringResult out) try {
   const auto modes = compute_modes(s);
   if (modes.empty()) { out.set_null(); return; }
+
   std::string json;
-  json.reserve(modes.size() * 8 + 2);
-  json += '[';
+  json.reserve(modes.size() * 24 + 48);
+  json += "{\"values\":[";
   for (size_t i = 0; i < modes.size(); ++i) {
-    if (i > 0) json += ", ";
-    char buf[32];
-    std::snprintf(buf, sizeof(buf), "%g", modes[i]);
-    json += buf;
+    if (i > 0) json += ',';
+    json += fmt_no_exp(modes[i]);
   }
-  json += ']';
+  json += "],\"min\":";
+  json += fmt_no_exp(modes.front());
+  json += ",\"max\":";
+  json += fmt_no_exp(modes.back());
+  json += '}';
   out.set(json);
 } catch (...) { out.error("STATS_MODE: unexpected error"); }
 
-static void stats_mode_min_result(const ModeState &s, RealResult out) try {
-  if (s.freq.empty()) { out.set_null(); return; }
-  size_t max_freq = 0;
-  double min_val = std::numeric_limits<double>::infinity();
-  for (const auto &kv : s.freq) {
-    if (kv.second > max_freq) {
-      max_freq = kv.second;
-      min_val = kv.first;
-    } else if (kv.second == max_freq) {
-      min_val = std::min(min_val, kv.first);
-    }
-  }
-  if (max_freq <= 1) { out.set_null(); return; }
-  out.set(min_val);
-} catch (...) { out.error("STATS_MODE_MIN: unexpected error"); }
-
-static void stats_mode_max_result(const ModeState &s, RealResult out) try {
-  if (s.freq.empty()) { out.set_null(); return; }
-  size_t max_freq = 0;
-  double max_val = -std::numeric_limits<double>::infinity();
-  for (const auto &kv : s.freq) {
-    if (kv.second > max_freq) {
-      max_freq = kv.second;
-      max_val = kv.first;
-    } else if (kv.second == max_freq) {
-      max_val = std::max(max_val, kv.first);
-    }
-  }
-  if (max_freq <= 1) { out.set_null(); return; }
-  out.set(max_val);
-} catch (...) { out.error("STATS_MODE_MAX: unexpected error"); }
-
-template<auto ResultFn>
-static constexpr auto make_mode_real_func(const char *name) {
-  return vsql::make_aggregate_func<ModeState, ResultFn>(name)
-    .returns(vsql::REAL)
-    .param(vsql::REAL)
-    .template clear<&mode_clear>()
-    .template accumulate<&mode_accumulate>()
-    .build();
-}
-
-template<auto ResultFn>
-static constexpr auto make_mode_str_func(const char *name) {
-  return vsql::make_aggregate_func<ModeState, ResultFn>(name)
+static constexpr auto make_mode_json_func(const char *name) {
+  return vsql::make_aggregate_func<ModeState, &stats_mode_json_result>(name)
     .returns(vsql::STRING)
     .param(vsql::REAL)
     .template clear<&mode_clear>()
@@ -1163,9 +1125,7 @@ VEF_GENERATE_ENTRY_POINTS(
     .func(make_stats_func<&stats_iqr_upper_fence_result>("STATS_IQR_UPPER_FENCE"))
     .func(make_ttest_func("STATS_TTEST"))
     .func(make_ttest_groups_func("STATS_TTEST_GROUPS"))
-    .func(make_mode_str_func<&stats_mode_result>("STATS_MODE"))
-    .func(make_mode_real_func<&stats_mode_min_result>("STATS_MODE_MIN"))
-    .func(make_mode_real_func<&stats_mode_max_result>("STATS_MODE_MAX"))
+    .func(make_mode_json_func("STATS_MODE"))
     .func(make_skewness_json_func("STATS_SKEWNESS"))
     .func(make_ztest_func<&stats_ztest_z_result>("STATS_ZTEST_Z"))
     .func(make_ztest_func<&stats_ztest_p_one_tail_result>("STATS_ZTEST_P_ONE_TAIL"))

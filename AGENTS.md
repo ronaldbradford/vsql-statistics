@@ -10,7 +10,7 @@ This file provides guidance to AI coding assistants when working with code in th
 
 - **IQR family (6 functions):** `STATS_IQR`, `STATS_Q1`, `STATS_Q3`, `STATS_MEDIAN`, `STATS_IQR_LOWER_FENCE`, `STATS_IQR_UPPER_FENCE`
 - **Two-sample t-test family (2 JSON functions):** `STATS_TTEST`, `STATS_TTEST_GROUPS`
-- **Mode family (3 functions):** `STATS_MODE`, `STATS_MODE_MIN`, `STATS_MODE_MAX`
+- **Mode family (1 JSON function):** `STATS_MODE`
 - **Skewness family (1 JSON function):** `STATS_SKEWNESS`
 - **Z-test family (3 functions):** `STATS_ZTEST_Z`, `STATS_ZTEST_P_ONE_TAIL`, `STATS_ZTEST_P_TWO_TAIL`
 - **Chi-squared family (2 JSON functions):** `STATS_CHISQ_GOF`, `STATS_CHISQ_INDEP`
@@ -47,7 +47,7 @@ The IQR family (6 functions) shares one `StatsState` with a single `values` vect
 
 The t-test family (2 JSON functions) uses `TTestState` with separate `group1`/`group2` vectors and a stored `alpha`. Group membership is passed as the second argument (1 = group 1, 2 = group 2). `STATS_TTEST(value, group, alpha)` returns a JSON STRING with `{pooled_var, df, t, p_one_tail, t_crit_one_tail, p_two_tail, t_crit_two_tail}`; `STATS_TTEST_GROUPS(value, group)` returns `{mean_1, mean_2, variance_1, variance_2, n_1, n_2}`.
 
-The mode family (3 functions) uses `ModeState` with `std::unordered_map<double, size_t>` for frequency counting. `STATS_MODE` returns a JSON STRING; `STATS_MODE_MIN` and `STATS_MODE_MAX` return REAL. All three return NULL when no value appears more than once. NaN inputs are skipped alongside NULLs.
+The mode family (1 JSON function) uses `ModeState` with `std::unordered_map<double, size_t>` for frequency counting. `STATS_MODE(col)` returns a JSON STRING `{"values":[...], "min":..., "max":...}` where `values` is the sorted array of all values tied for highest frequency, and `min`/`max` are its first and last elements for convenient extraction. Returns NULL when no value repeats or all inputs are NULL/NaN. Use `CAST(... AS CHAR)` to read results in the mysql CLI.
 
 The skewness family (1 JSON function) uses `StatsState` (vector of doubles). `STATS_SKEWNESS(col)` returns a JSON STRING `{"moment": ..., "pearson": ...}` where `moment` is the population skewness g₁ = m₃/m₂^(3/2) and `pearson` is 3×(mean−median)/σ. Both fields are `null` when variance is zero. The function returns NULL when n < 2. Use `CAST(... AS CHAR)` and `JSON_EXTRACT` to access individual fields.
 
@@ -71,7 +71,7 @@ The covariance family (2 functions) uses `CovState` — a streaming accumulator 
 **Function registration:** `make_aggregate_func<StatsState, &result_fn>(name).returns(REAL).param(REAL).clear<&stats_clear>().accumulate<&stats_accumulate>().build()`
 
 **Key files:**
-- `src/vsql_statistics.cc` — all 31 aggregate functions (6 IQR + 2 t-test + 3 mode + 1 skewness + 3 z-test + 2 chi-squared + 1 kurtosis + 2 covariance + 4 means + 9 ANOVA)
+- `src/vsql_statistics.cc` — all 29 aggregate functions (6 IQR + 2 t-test + 1 mode + 1 skewness + 3 z-test + 2 chi-squared + 1 kurtosis + 2 covariance + 4 means + 9 ANOVA)
 - `manifest.json` — extension metadata
 - `CMakeLists.txt` — build configuration
 - `cmake/FindVillageSQL.cmake` — SDK discovery
@@ -106,7 +106,7 @@ INSTALL EXTENSION vsql_statistics;
 SELECT STATS_IQR(CAST(col AS DOUBLE)) FROM t GROUP BY group_col;
 SELECT CAST(STATS_TTEST(value, grp, 0.05) AS CHAR) FROM t;
 SELECT CAST(STATS_TTEST_GROUPS(value, grp) AS CHAR) FROM t;
-SELECT STATS_MODE(CAST(col AS DOUBLE)) FROM t;
+SELECT CAST(STATS_MODE(CAST(col AS DOUBLE)) AS CHAR) FROM t;
 SELECT CAST(STATS_SKEWNESS(col) AS CHAR) FROM t;
 SELECT STATS_ZTEST_Z(col, 500.0, 40.0) FROM t;
 SELECT STATS_ZTEST_P_TWO_TAIL(col, 500.0, 40.0) FROM t;

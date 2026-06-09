@@ -8,7 +8,7 @@ Statistical aggregate functions for data scientists — IQR, quartiles, outlier 
 |--------|------:|-----------|
 | **IQR** | 6 | `STATS_IQR`, `STATS_Q1`, `STATS_Q3`, `STATS_MEDIAN`, `STATS_IQR_LOWER_FENCE`, `STATS_IQR_UPPER_FENCE` |
 | **T-test** | 2 | `STATS_TTEST`, `STATS_TTEST_GROUPS` |
-| **Mode** | 3 | `STATS_MODE`, `STATS_MODE_MIN`, `STATS_MODE_MAX` |
+| **Mode** | 1 | `STATS_MODE` |
 | **Skewness** | 1 | `STATS_SKEWNESS` |
 | **Z-test** | 3 | `STATS_ZTEST_Z`, `STATS_ZTEST_P_ONE_TAIL`, `STATS_ZTEST_P_TWO_TAIL` |
 | **Chi-squared** | 2 | `STATS_CHISQ_GOF`, `STATS_CHISQ_INDEP` |
@@ -16,7 +16,7 @@ Statistical aggregate functions for data scientists — IQR, quartiles, outlier 
 | **Covariance** | 2 | `STATS_COVARIANCE_POP`, `STATS_COVARIANCE_SAMP` |
 | **Means** | 4 | `STATS_MEAN_TRIMMED`, `STATS_MEAN_WINSORIZED`, `STATS_MEAN_GEOMETRIC`, `STATS_MEAN_HARMONIC` |
 | **ANOVA** | 9 | `STATS_ANOVA_F`, `STATS_ANOVA_P`, `STATS_ANOVA_SSB`, `STATS_ANOVA_SSW`, `STATS_ANOVA_SST`, `STATS_ANOVA_MSB`, `STATS_ANOVA_MSW`, `STATS_ANOVA_DFB`, `STATS_ANOVA_DFW` |
-| **Total** | **33** | |
+| **Total** | **31** | |
 
 > **Beta notice:** All functions in this extension (`STATS_IQR`, `STATS_TTEST`, `STATS_TTEST_GROUPS`, `STATS_MODE`, `STATS_SKEWNESS`, `STATS_ZTEST_*`, `STATS_CHISQ_*`, `STATS_KURTOSIS`, `STATS_COVARIANCE_*`, `STATS_MEAN_*`, `STATS_ANOVA_*`) are beta quality. They are functionally correct on the tested datasets but have not been validated at production scale. Use with caution in high-volume or precision-critical workloads and report any anomalies.
 
@@ -64,11 +64,11 @@ SELECT
 FROM groups;
 
 -- Find the most common value(s) in a column
-SELECT
-  STATS_MODE(CAST(score AS DOUBLE))     AS all_modes,
-  STATS_MODE_MIN(CAST(score AS DOUBLE)) AS lowest_mode,
-  STATS_MODE_MAX(CAST(score AS DOUBLE)) AS highest_mode
-FROM survey_responses;
+WITH m AS (SELECT CAST(STATS_MODE(CAST(score AS DOUBLE)) AS CHAR(200)) AS json FROM survey_responses)
+SELECT JSON_EXTRACT(json, '$.values') AS all_modes,
+       JSON_EXTRACT(json, '$.min')    AS lowest_mode,
+       JSON_EXTRACT(json, '$.max')    AS highest_mode
+FROM m;
 
 -- Measure distribution asymmetry (moment = third standardized moment, pearson = median-based)
 WITH s AS (SELECT CAST(STATS_SKEWNESS(salary) AS CHAR(200)) AS json FROM employee_compensation)
@@ -194,17 +194,14 @@ See `examples/t_test_height.sql` and `examples/t_test_us_draft.sql` for complete
 
 | Function | Returns | Description |
 |---|---|---|
-| `STATS_MODE(col)` | `STRING` | JSON array of all values tied for the highest frequency, sorted ascending |
-| `STATS_MODE_MIN(col)` | `DOUBLE` | Smallest value with the highest frequency |
-| `STATS_MODE_MAX(col)` | `DOUBLE` | Largest value with the highest frequency |
+| `STATS_MODE(col)` | `STRING` | JSON `{"values":[...], "min":..., "max":...}` — `values` is sorted ascending; `min`/`max` are the first and last elements |
 
-All mode functions:
-- Skip NULL and NaN inputs
-- Return NULL when no value appears more than once (including single-row groups and all-unique groups)
-- For unimodal data, `STATS_MODE_MIN` and `STATS_MODE_MAX` return the same value
-- Work with `GROUP BY`
+`STATS_MODE`:
+- Skips NULL and NaN inputs
+- Returns NULL when no value appears more than once (all-unique groups, single-row groups, all-NULL groups)
+- Works with `GROUP BY`
 
-`STATS_MODE` returns a JSON string (e.g. `[24, 29]` for a bimodal dataset). Use `CAST(col AS DOUBLE)` on INT columns — without it the JSON values will be integer-rounded.
+Use `CAST(col AS DOUBLE)` on INT columns — without it the JSON values will be integer-rounded. Use `CAST(STATS_MODE(...) AS CHAR)` to read results in the mysql CLI.
 
 ### One-Sample Z-Test Family (known population mean and standard deviation)
 
@@ -387,7 +384,7 @@ SELECT STATS_IQR(daily_count) FROM espresso_sales;
 
 **Memory usage for large groups.** Exact quartile computation requires accumulating and sorting all values per group. For groups with millions of rows, memory and CPU cost will be proportional to group size. There is no streaming approximation within VEF.
 
-**STATS_MODE displays as hex in the mysql CLI.** VEF 0.0.4's `STRING` return type carries no character set metadata, so the MySQL client treats the value as binary and displays it as hex (e.g. `0x5B31355D` instead of `[15]`). The data is correct.
+**JSON STRING functions display as hex in the mysql CLI.** VEF 0.0.4's `STRING` return type carries no character set metadata, so the MySQL client treats the value as binary and displays it as hex. The data is correct.
 
 Workarounds:
 
@@ -398,7 +395,8 @@ mysql --skip-binary-as-hex
 
 ```sql
 -- Or cast in SQL (works in all clients):
-SELECT CAST(STATS_MODE(CAST(val AS DOUBLE)) AS CHAR) AS modes FROM t;
+SELECT CAST(STATS_MODE(CAST(val AS DOUBLE)) AS CHAR) AS mode FROM t;
+SELECT CAST(STATS_TTEST(value, grp, 0.05) AS CHAR) AS ttest FROM t;
 ```
 
 **No in-place upgrade.** Upgrading the extension requires two separate steps:
