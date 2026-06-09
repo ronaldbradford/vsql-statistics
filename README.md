@@ -15,10 +15,10 @@ Statistical aggregate functions for data scientists — IQR, quartiles, outlier 
 | **Kurtosis** | 1 | `STATS_KURTOSIS` |
 | **Covariance** | 1 | `STATS_COVARIANCE` |
 | **Means** | 4 | `STATS_MEAN_TRIMMED`, `STATS_MEAN_WINSORIZED`, `STATS_MEAN_GEOMETRIC`, `STATS_MEAN_HARMONIC` |
-| **ANOVA** | 9 | `STATS_ANOVA_F`, `STATS_ANOVA_P`, `STATS_ANOVA_SSB`, `STATS_ANOVA_SSW`, `STATS_ANOVA_SST`, `STATS_ANOVA_MSB`, `STATS_ANOVA_MSW`, `STATS_ANOVA_DFB`, `STATS_ANOVA_DFW` |
-| **Total** | **28** | |
+| **ANOVA** | 1 | `STATS_ANOVA` |
+| **Total** | **20** | |
 
-> **Beta notice:** All functions in this extension (`STATS_IQR`, `STATS_TTEST`, `STATS_TTEST_GROUPS`, `STATS_MODE`, `STATS_SKEWNESS`, `STATS_ZTEST`, `STATS_CHISQ_*`, `STATS_KURTOSIS`, `STATS_COVARIANCE`, `STATS_MEAN_*`, `STATS_ANOVA_*`) are beta quality. They are functionally correct on the tested datasets but have not been validated at production scale. Use with caution in high-volume or precision-critical workloads and report any anomalies.
+> **Beta notice:** All functions in this extension (`STATS_IQR`, `STATS_TTEST`, `STATS_TTEST_GROUPS`, `STATS_MODE`, `STATS_SKEWNESS`, `STATS_ZTEST`, `STATS_CHISQ_*`, `STATS_KURTOSIS`, `STATS_COVARIANCE`, `STATS_MEAN_*`, `STATS_ANOVA`) are beta quality. They are functionally correct on the tested datasets but have not been validated at production scale. Use with caution in high-volume or precision-critical workloads and report any anomalies.
 
 
 ## Installing
@@ -128,12 +128,12 @@ SELECT
 FROM indep;
 
 -- One-way ANOVA: do three or more groups have the same population mean?
-SELECT
-  STATS_ANOVA_F(score, treatment_group)  AS f_stat,
-  STATS_ANOVA_P(score, treatment_group)  AS p_value,
-  STATS_ANOVA_SSB(score, treatment_group) AS ss_between,
-  STATS_ANOVA_SSW(score, treatment_group) AS ss_within
-FROM clinical_trial;
+WITH a AS (SELECT CAST(STATS_ANOVA(score, treatment_group) AS CHAR(400)) AS json FROM clinical_trial)
+SELECT JSON_EXTRACT(json, '$.f')   AS f_stat,
+       JSON_EXTRACT(json, '$.p')   AS p_value,
+       JSON_EXTRACT(json, '$.ssb') AS ss_between,
+       JSON_EXTRACT(json, '$.ssw') AS ss_within
+FROM a;
 ```
 
 ## Function Reference
@@ -326,29 +326,31 @@ See `examples/chisq_support_tickets.sql` for a complete worked example.
 
 Tests whether three or more independent groups share the same population mean by partitioning total variance into between-group (treatment) and within-group (error) components.
 
-All functions accept `(value, group)` where the group column identifies which group each row belongs to (any distinct numeric value).
+`STATS_ANOVA(value, group)` accepts any distinct numeric group label and returns a JSON STRING with all ANOVA table fields:
 
-| Function | Returns | Description |
-|---|---|---|
-| `STATS_ANOVA_F(value, group)` | `DOUBLE` | F-statistic: MSB / MSW |
-| `STATS_ANOVA_P(value, group)` | `DOUBLE` | P-value: P(F_{dfB,dfW} > F) |
-| `STATS_ANOVA_SSB(value, group)` | `DOUBLE` | Between-group sum of squares |
-| `STATS_ANOVA_SSW(value, group)` | `DOUBLE` | Within-group sum of squares (error) |
-| `STATS_ANOVA_SST(value, group)` | `DOUBLE` | Total sum of squares (SSB + SSW) |
-| `STATS_ANOVA_MSB(value, group)` | `DOUBLE` | Mean square between: SSB / (k − 1) |
-| `STATS_ANOVA_MSW(value, group)` | `DOUBLE` | Mean square within: SSW / (N − k) |
-| `STATS_ANOVA_DFB(value, group)` | `DOUBLE` | Between-group degrees of freedom: k − 1 |
-| `STATS_ANOVA_DFW(value, group)` | `DOUBLE` | Within-group degrees of freedom: N − k |
+| Field | Description |
+|---|---|
+| `f` | F-statistic: MSB / MSW |
+| `p` | P-value: P(F_{df_b,df_w} > F) |
+| `ssb` | Between-group sum of squares |
+| `ssw` | Within-group sum of squares (error) |
+| `sst` | Total sum of squares (SSB + SSW) |
+| `msb` | Mean square between: SSB / (k − 1) |
+| `msw` | Mean square within: SSW / (N − k) |
+| `df_b` | Between-group degrees of freedom: k − 1 |
+| `df_w` | Within-group degrees of freedom: N − k |
 
-All ANOVA functions:
-- Use Welford's online algorithm for numerically stable within-group variance (O(1) memory per group)
-- Skip NULL values in the `value` or `group` column
-- Return NULL when fewer than 2 distinct groups are present
-- Return NULL when any group has fewer than 2 non-NULL observations
-- Return NULL when within-group variance is zero (MSW = 0)
-- Work with `GROUP BY`, computing an independent ANOVA per partition
+`STATS_ANOVA`:
+- Uses Welford's online algorithm for numerically stable within-group variance (O(1) memory per group)
+- Skips NULL values in the `value` or `group` column
+- Returns NULL when fewer than 2 distinct groups are present
+- Returns NULL when any group has fewer than 2 non-NULL observations
+- Returns NULL when within-group variance is zero (MSW = 0)
+- Works with `GROUP BY`, computing an independent ANOVA per partition
 
 The spec requires k ≥ 3 groups for a valid one-way ANOVA. k = 2 is mathematically equivalent to a t-test — use `STATS_TTEST` for two-group comparisons.
+
+Use `CAST(STATS_ANOVA(...) AS CHAR)` to read results in the mysql CLI.
 
 ### Skewness Family
 

@@ -1,6 +1,6 @@
 # vsql_statistics: One-way ANOVA (Analysis of Variance)
 INSTALL EXTENSION vsql_statistics;
-# --- Spec test vector: k=3, n_j=5 (all 9 functions) ---
+# --- Spec test vector: k=3, n_j=5 ---
 # Group 1: {4,6,8,7,5}   mean=6, SSw=10
 # Group 2: {1,3,2,4,5}   mean=3, SSw=10
 # Group 3: {8,10,9,7,11} mean=9, SSw=10
@@ -10,56 +10,19 @@ INSERT INTO anova_spec VALUES
 (4,1),(6,1),(8,1),(7,1),(5,1),
 (1,2),(3,2),(2,2),(4,2),(5,2),
 (8,3),(10,3),(9,3),(7,3),(11,3);
-SELECT STATS_ANOVA_F(value, grp)   AS f    FROM anova_spec;
-f
-18
-SELECT STATS_ANOVA_P(value, grp)   AS p    FROM anova_spec;
-p
-0.00024414062500000027
-SELECT STATS_ANOVA_SSB(value, grp) AS ssb  FROM anova_spec;
-ssb
-90
-SELECT STATS_ANOVA_SSW(value, grp) AS ssw  FROM anova_spec;
-ssw
-30
-SELECT STATS_ANOVA_SST(value, grp) AS sst  FROM anova_spec;
-sst
-120
-SELECT STATS_ANOVA_MSB(value, grp) AS msb  FROM anova_spec;
-msb
-45
-SELECT STATS_ANOVA_MSW(value, grp) AS msw  FROM anova_spec;
-msw
-2.5
-SELECT STATS_ANOVA_DFB(value, grp) AS df_b FROM anova_spec;
-df_b
-2
-SELECT STATS_ANOVA_DFW(value, grp) AS df_w FROM anova_spec;
-df_w
-12
+SELECT CAST(STATS_ANOVA(value, grp) AS CHAR) AS anova FROM anova_spec;
+anova
+{"f":18,"p":0.000244140625,"ssb":90,"ssw":30,"sst":120,"msb":45,"msw":2.5,"df_b":2,"df_w":12}
 DROP TABLE anova_spec;
 # --- Equal group means: SSB=0, F=0, p=1 ---
-# Groups {1,2,3} x3: all means=2, grand mean=2
 CREATE TABLE anova_equal (value DOUBLE, grp INT);
 INSERT INTO anova_equal VALUES
 (1,1),(2,1),(3,1),
 (1,2),(2,2),(3,2),
 (1,3),(2,3),(3,3);
-SELECT STATS_ANOVA_F(value, grp)   AS f   FROM anova_equal;
-f
-0
-SELECT STATS_ANOVA_P(value, grp)   AS p   FROM anova_equal;
-p
-1
-SELECT STATS_ANOVA_SSB(value, grp) AS ssb FROM anova_equal;
-ssb
-0
-SELECT STATS_ANOVA_SSW(value, grp) AS ssw FROM anova_equal;
-ssw
-6
-SELECT STATS_ANOVA_MSW(value, grp) AS msw FROM anova_equal;
-msw
-1
+SELECT CAST(STATS_ANOVA(value, grp) AS CHAR) AS anova FROM anova_equal;
+anova
+{"f":0,"p":1,"ssb":0,"ssw":6,"sst":6,"msb":0,"msw":1,"df_b":2,"df_w":6}
 DROP TABLE anova_equal;
 # --- NULL values are ignored: same result as spec test vector ---
 CREATE TABLE anova_with_nulls (value DOUBLE, grp INT);
@@ -68,21 +31,15 @@ INSERT INTO anova_with_nulls VALUES
 (1,2),(3,2),(2,2),(4,2),(5,2),
 (8,3),(10,3),(9,3),(7,3),(11,3),
 (NULL,1),(NULL,2),(NULL,3);
-SELECT STATS_ANOVA_F(value, grp)   AS f   FROM anova_with_nulls;
-f
-18
-SELECT STATS_ANOVA_SSB(value, grp) AS ssb FROM anova_with_nulls;
-ssb
-90
-SELECT STATS_ANOVA_SSW(value, grp) AS ssw FROM anova_with_nulls;
-ssw
-30
+SELECT CAST(STATS_ANOVA(value, grp) AS CHAR) AS anova FROM anova_with_nulls;
+anova
+{"f":18,"p":0.000244140625,"ssb":90,"ssw":30,"sst":120,"msb":45,"msw":2.5,"df_b":2,"df_w":12}
 DROP TABLE anova_with_nulls;
 # --- Edge case: only one distinct group returns NULL ---
 CREATE TABLE anova_one_group (value DOUBLE, grp INT);
 INSERT INTO anova_one_group VALUES (4,1),(6,1),(8,1);
-SELECT STATS_ANOVA_F(value, grp) AS f_one_group FROM anova_one_group;
-f_one_group
+SELECT CAST(STATS_ANOVA(value, grp) AS CHAR) AS anova FROM anova_one_group;
+anova
 NULL
 DROP TABLE anova_one_group;
 # --- Edge case: group with a single observation returns NULL ---
@@ -91,32 +48,31 @@ INSERT INTO anova_singleton VALUES
 (1,1),
 (2,2),(3,2),(4,2),
 (5,3),(6,3),(7,3);
-SELECT STATS_ANOVA_F(value, grp) AS f_singleton FROM anova_singleton;
-f_singleton
+SELECT CAST(STATS_ANOVA(value, grp) AS CHAR) AS anova FROM anova_singleton;
+anova
 NULL
 DROP TABLE anova_singleton;
 # --- Edge case: all-NULL input returns NULL ---
 CREATE TABLE anova_all_null (value DOUBLE, grp INT);
 INSERT INTO anova_all_null VALUES
 (NULL,1),(NULL,1),(NULL,2),(NULL,2),(NULL,3),(NULL,3);
-SELECT STATS_ANOVA_F(value, grp) AS f_all_null FROM anova_all_null;
-f_all_null
+SELECT CAST(STATS_ANOVA(value, grp) AS CHAR) AS anova FROM anova_all_null;
+anova
 NULL
 DROP TABLE anova_all_null;
 # --- Edge case: zero within-group variance returns NULL (MSW=0) ---
-# All values identical within each group; SSW=0, MSW=0
 CREATE TABLE anova_zero_within (value DOUBLE, grp INT);
 INSERT INTO anova_zero_within VALUES
 (5,1),(5,1),(5,1),
 (10,2),(10,2),(10,2),
 (15,3),(15,3),(15,3);
-SELECT STATS_ANOVA_F(value, grp) AS f_zero_within FROM anova_zero_within;
-f_zero_within
+SELECT CAST(STATS_ANOVA(value, grp) AS CHAR) AS anova FROM anova_zero_within;
+anova
 NULL
 DROP TABLE anova_zero_within;
 # --- GROUP BY: two independent ANOVA tests in one query ---
-# Exp 1: same as spec vector, F=18
-# Exp 2: groups {10-14},{20-24},{30-34} — same within-group spread, larger between, F=200
+# Exp 1: spec vector, F=18
+# Exp 2: groups {10-14},{20-24},{30-34} — same within spread, larger between, F=200
 CREATE TABLE anova_grouped (exp_id INT, value DOUBLE, grp INT);
 INSERT INTO anova_grouped VALUES
 (1, 4,1),(1, 6,1),(1, 8,1),(1, 7,1),(1, 5,1),
@@ -126,14 +82,12 @@ INSERT INTO anova_grouped VALUES
 (2,20,2),(2,22,2),(2,24,2),(2,21,2),(2,23,2),
 (2,30,3),(2,32,3),(2,34,3),(2,31,3),(2,33,3);
 SELECT exp_id,
-STATS_ANOVA_F(value, grp)   AS f,
-STATS_ANOVA_SSB(value, grp) AS ssb,
-STATS_ANOVA_SSW(value, grp) AS ssw
+CAST(STATS_ANOVA(value, grp) AS CHAR) AS anova
 FROM anova_grouped
 GROUP BY exp_id
 ORDER BY exp_id;
-exp_id	f	ssb	ssw
-1	18	90	30
-2	200	1000	30
+exp_id	anova
+1	{"f":18,"p":0.000244140625,"ssb":90,"ssw":30,"sst":120,"msb":45,"msw":2.5,"df_b":2,"df_w":12}
+2	{"f":200,"p":0.000000000610526,"ssb":1000,"ssw":30,"sst":1030,"msb":500,"msw":2.5,"df_b":2,"df_w":12}
 DROP TABLE anova_grouped;
 UNINSTALL EXTENSION vsql_statistics;

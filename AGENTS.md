@@ -17,6 +17,7 @@ This file provides guidance to AI coding assistants when working with code in th
 - **Kurtosis family (1 JSON function):** `STATS_KURTOSIS`
 - **Covariance family (1 JSON function):** `STATS_COVARIANCE`
 - **Means family — beta (4 functions):** `STATS_MEAN_TRIMMED`, `STATS_MEAN_WINSORIZED`, `STATS_MEAN_GEOMETRIC`, `STATS_MEAN_HARMONIC`
+- **ANOVA family (1 JSON function):** `STATS_ANOVA`
 
 All functions operate on `DOUBLE` columns and are usable with `GROUP BY`, mirroring statistical primitives found in Python (numpy/scipy) and R.
 
@@ -61,7 +62,7 @@ The means family (4 functions — beta) uses three states. `MeanTrimState` (vect
 
 The chi-squared family (2 JSON functions) uses two states. `ChiSqGofState` (chi_sq, k) serves `STATS_CHISQ_GOF(observed, expected)`, which returns a JSON STRING `{chi_sq, df, p}` where df = k−1 and p is null when df = 0. `ChiSqIndepState` (chi_sq, k, n_rows, n_cols) serves `STATS_CHISQ_INDEP(observed, expected, n_rows, n_cols)`, which returns `{chi_sq, df, p}` where df = (n_rows−1)(n_cols−1); df and p are null when dimensions are missing or df ≤ 0. The p-value is the regularized upper incomplete gamma Q(df/2, χ²/2); computed via series expansion (x < a+1) or Lentz's continued fraction (x ≥ a+1). Rows where expected ≤ 0 are skipped. Both functions return NULL when no valid (O, E) pairs exist. Use `CAST(... AS CHAR)` to read results in the mysql CLI.
 
-The covariance family (2 functions) uses `CovState` — a streaming accumulator of n, mean_x, mean_y, and C (Welford's co-moment). Each row passes two REAL arguments (x, y); a row is skipped if either is NULL (concurrent-pair discard). `STATS_COVARIANCE_POP` returns C/n (0.0 for n=1, NULL for n=0). `STATS_COVARIANCE_SAMP` returns C/(n−1) (NULL for n < 2).
+The ANOVA family (1 JSON function) uses `AnovaState` — an `unordered_map<double, AnovaGroupStats>` keyed by group label, where each `AnovaGroupStats` holds n, sum, a running mean, and Welford's M2 (within-group SS). `STATS_ANOVA(value, group)` returns a JSON STRING `{"f":..., "p":..., "ssb":..., "ssw":..., "sst":..., "msb":..., "msw":..., "df_b":..., "df_w":...}`. Returns NULL when k < 2, any group has n < 2, or MSW = 0. The p-value is P(F_{df_b,df_w} > F) = I_{df_w/(df_w+df_b·F)}(df_w/2, df_b/2) via the regularized incomplete beta function. Use `CAST(... AS CHAR)` to read results in the mysql CLI.
 
 **Quartile algorithm:** Tukey's hinges (exclusive median). For a sorted vector of n values:
 - Lower half: indices [0, n/2)
@@ -73,7 +74,7 @@ The covariance family (2 functions) uses `CovState` — a streaming accumulator 
 **Function registration:** `make_aggregate_func<StatsState, &result_fn>(name).returns(REAL).param(REAL).clear<&stats_clear>().accumulate<&stats_accumulate>().build()`
 
 **Key files:**
-- `src/vsql_statistics.cc` — all 28 aggregate functions (6 IQR + 2 t-test + 1 mode + 1 skewness + 1 z-test + 2 chi-squared + 1 kurtosis + 1 covariance + 4 means + 9 ANOVA)
+- `src/vsql_statistics.cc` — all 20 aggregate functions (6 IQR + 2 t-test + 1 mode + 1 skewness + 1 z-test + 2 chi-squared + 1 kurtosis + 1 covariance + 4 means + 1 ANOVA)
 - `manifest.json` — extension metadata
 - `CMakeLists.txt` — build configuration
 - `cmake/FindVillageSQL.cmake` — SDK discovery

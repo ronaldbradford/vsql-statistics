@@ -1049,66 +1049,39 @@ static std::optional<AnovaResult> compute_anova(const AnovaState &s) {
   return AnovaResult{ssb, ssw, ssb + ssw, msb, msw, f, df_b, df_w};
 }
 
-static void stats_anova_f_result(const AnovaState &s, RealResult out) try {
-  const auto r = compute_anova(s);
-  if (!r) { out.set_null(); return; }
-  out.set(r->f);
-} catch (...) { out.error("STATS_ANOVA_F: unexpected error"); }
-
 // P(F_{dfB,dfW} > F) = I_{dfW/(dfW + dfB·F)}(dfW/2, dfB/2)
-static void stats_anova_p_result(const AnovaState &s, RealResult out) try {
+static void stats_anova_json_result(const AnovaState &s, StringResult out) try {
   const auto r = compute_anova(s);
   if (!r) { out.set_null(); return; }
-  const double x = r->df_w / (r->df_w + r->df_b * r->f);
-  out.set(betai(x, r->df_w / 2.0, r->df_b / 2.0));
-} catch (...) { out.error("STATS_ANOVA_P: unexpected error"); }
 
-static void stats_anova_ssb_result(const AnovaState &s, RealResult out) try {
-  const auto r = compute_anova(s);
-  if (!r) { out.set_null(); return; }
-  out.set(r->ssb);
-} catch (...) { out.error("STATS_ANOVA_SSB: unexpected error"); }
+  const double p = betai(r->df_w / (r->df_w + r->df_b * r->f), r->df_w / 2.0, r->df_b / 2.0);
 
-static void stats_anova_ssw_result(const AnovaState &s, RealResult out) try {
-  const auto r = compute_anova(s);
-  if (!r) { out.set_null(); return; }
-  out.set(r->ssw);
-} catch (...) { out.error("STATS_ANOVA_SSW: unexpected error"); }
+  std::string json;
+  json.reserve(256);
 
-static void stats_anova_sst_result(const AnovaState &s, RealResult out) try {
-  const auto r = compute_anova(s);
-  if (!r) { out.set_null(); return; }
-  out.set(r->sst);
-} catch (...) { out.error("STATS_ANOVA_SST: unexpected error"); }
+  auto append = [&](const char *key, double val) {
+    json += '"'; json += key; json += "\":";
+    json += fmt_no_exp(val);
+  };
 
-static void stats_anova_msb_result(const AnovaState &s, RealResult out) try {
-  const auto r = compute_anova(s);
-  if (!r) { out.set_null(); return; }
-  out.set(r->msb);
-} catch (...) { out.error("STATS_ANOVA_MSB: unexpected error"); }
+  json += '{';
+  append("f",    r->f);    json += ',';
+  append("p",    p);       json += ',';
+  append("ssb",  r->ssb);  json += ',';
+  append("ssw",  r->ssw);  json += ',';
+  append("sst",  r->sst);  json += ',';
+  append("msb",  r->msb);  json += ',';
+  append("msw",  r->msw);  json += ',';
+  append("df_b", r->df_b); json += ',';
+  append("df_w", r->df_w);
+  json += '}';
 
-static void stats_anova_msw_result(const AnovaState &s, RealResult out) try {
-  const auto r = compute_anova(s);
-  if (!r) { out.set_null(); return; }
-  out.set(r->msw);
-} catch (...) { out.error("STATS_ANOVA_MSW: unexpected error"); }
+  out.set(json);
+} catch (...) { out.error("STATS_ANOVA: unexpected error"); }
 
-static void stats_anova_dfb_result(const AnovaState &s, RealResult out) try {
-  const auto r = compute_anova(s);
-  if (!r) { out.set_null(); return; }
-  out.set(r->df_b);
-} catch (...) { out.error("STATS_ANOVA_DFB: unexpected error"); }
-
-static void stats_anova_dfw_result(const AnovaState &s, RealResult out) try {
-  const auto r = compute_anova(s);
-  if (!r) { out.set_null(); return; }
-  out.set(r->df_w);
-} catch (...) { out.error("STATS_ANOVA_DFW: unexpected error"); }
-
-template<auto ResultFn>
-static constexpr auto make_anova_func(const char *name) {
-  return vsql::make_aggregate_func<AnovaState, ResultFn>(name)
-    .returns(vsql::REAL)
+static constexpr auto make_anova_json_func(const char *name) {
+  return vsql::make_aggregate_func<AnovaState, &stats_anova_json_result>(name)
+    .returns(vsql::STRING)
     .param(vsql::REAL)
     .param(vsql::REAL)
     .template clear<&anova_clear>()
@@ -1141,13 +1114,5 @@ VEF_GENERATE_ENTRY_POINTS(
     .func(make_mean_trim_func<&stats_mean_winsorized_result>("STATS_MEAN_WINSORIZED"))
     .func(make_mean_geo_func<&stats_mean_geometric_result>("STATS_MEAN_GEOMETRIC"))
     .func(make_mean_harm_func<&stats_mean_harmonic_result>("STATS_MEAN_HARMONIC"))
-    .func(make_anova_func<&stats_anova_f_result>("STATS_ANOVA_F"))
-    .func(make_anova_func<&stats_anova_p_result>("STATS_ANOVA_P"))
-    .func(make_anova_func<&stats_anova_ssb_result>("STATS_ANOVA_SSB"))
-    .func(make_anova_func<&stats_anova_ssw_result>("STATS_ANOVA_SSW"))
-    .func(make_anova_func<&stats_anova_sst_result>("STATS_ANOVA_SST"))
-    .func(make_anova_func<&stats_anova_msb_result>("STATS_ANOVA_MSB"))
-    .func(make_anova_func<&stats_anova_msw_result>("STATS_ANOVA_MSW"))
-    .func(make_anova_func<&stats_anova_dfb_result>("STATS_ANOVA_DFB"))
-    .func(make_anova_func<&stats_anova_dfw_result>("STATS_ANOVA_DFW"))
+    .func(make_anova_json_func("STATS_ANOVA"))
 )
