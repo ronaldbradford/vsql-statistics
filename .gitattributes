@@ -1,1 +1,3 @@
 dist/*.veb binary
+images/*.png binary
+images/*.svg binary

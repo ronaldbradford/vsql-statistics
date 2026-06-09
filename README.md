@@ -139,6 +139,8 @@ FROM a;
 
 ### IQR Family
 
+![Box plot showing quartiles and IQR fence bounds](images/iqr.png)
+
 `STATS_IQR(col)` sorts the group once and returns a JSON STRING with all distribution summary fields:
 
 | Field | Description |
@@ -159,6 +161,8 @@ FROM a;
 Use `CAST(STATS_IQR(...) AS CHAR)` to read results in the mysql CLI.
 
 ### Two-Sample t-Test Family (equal variances / pooled variance)
+
+![One-sample t-test distribution with critical region](images/ttest.png)
 
 Both functions accept `(value, group)` where the group column identifies observations as belonging to group 1 or group 2. Other group values are silently ignored.
 
@@ -201,6 +205,8 @@ See `examples/t_test_height.sql` and `examples/t_test_us_draft.sql` for complete
 
 ### Mode Family
 
+![Distribution diagram comparing mean, median, and mode](images/mode.svg)
+
 | Function | Returns | Description |
 |---|---|---|
 | `STATS_MODE(col)` | `STRING` | JSON `{"values":[...], "min":..., "max":...}` — `values` is sorted ascending; `min`/`max` are the first and last elements |
@@ -213,6 +219,8 @@ See `examples/t_test_height.sql` and `examples/t_test_us_draft.sql` for complete
 Use `CAST(col AS DOUBLE)` on INT columns — without it the JSON values will be integer-rounded. Use `CAST(STATS_MODE(...) AS CHAR)` to read results in the mysql CLI.
 
 ### One-Sample Z-Test Family (known population mean and standard deviation)
+
+![Z-test null hypothesis rejection region](images/ztest.png)
 
 `STATS_ZTEST(value, mu, sigma)` takes the known population mean `mu` and standard deviation `sigma`, and returns a JSON STRING with three fields:
 
@@ -234,6 +242,8 @@ Use `CAST(STATS_ZTEST(...) AS CHAR)` to read results in the mysql CLI.
 
 ### Kurtosis Family
 
+![Overlaid probability density functions comparing kurtosis shapes](images/kurtosis.svg)
+
 | Function | Returns | Description |
 |---|---|---|
 | `STATS_KURTOSIS(col)` | `STRING` | JSON `{"kurtosis": ..., "excess": ...}` — `excess` is null when n < 4; both null when variance is zero |
@@ -249,6 +259,8 @@ Use `CAST(STATS_ZTEST(...) AS CHAR)` to read results in the mysql CLI.
 Interpretation: normal distribution has β₂ = 3 and g₂ = 0. Positive excess = heavy-tailed (leptokurtic); negative = light-tailed (platykurtic).
 
 ### Covariance Family
+
+![Scatter plots showing positive, negative, and zero covariance](images/covariance.svg)
 
 `STATS_COVARIANCE(x, y)` accepts one row per paired observation and returns a JSON STRING with two fields:
 
@@ -268,6 +280,8 @@ Interpretation: positive covariance means x and y increase together; negative me
 Use `CAST(STATS_COVARIANCE(...) AS CHAR)` to read results in the mysql CLI.
 
 ### Means Family
+
+![Distribution diagram showing mean, median, and mode positions](images/means.svg)
 
 `STATS_MEAN(value, trim_pct)` computes all four robust/ratio means in one pass and returns a JSON STRING:
 
@@ -289,6 +303,8 @@ Pass `NULL` for `trim_pct` when only `geometric` and `harmonic` are needed.
 Use `CAST(STATS_MEAN(...) AS CHAR)` to read results in the mysql CLI.
 
 ### Chi-Squared Family
+
+![Chi-squared distribution cumulative density functions](images/chisq.png)
 
 Both functions share a common formula — χ² = Σ[(O − E)² / E] — and return a JSON STRING with fields `chi_sq`, `df`, and `p`. Use `CAST(... AS CHAR(200))` and `JSON_EXTRACT` to access individual fields.
 
@@ -319,6 +335,8 @@ See `examples/chisq_support_tickets.sql` for a complete worked example.
 
 ### One-Way ANOVA Family
 
+![ANOVA diagram showing group means fitted over data points](images/anova.svg)
+
 Tests whether three or more independent groups share the same population mean by partitioning total variance into between-group (treatment) and within-group (error) components.
 
 `STATS_ANOVA(value, group)` accepts any distinct numeric group label and returns a JSON STRING with all ANOVA table fields:
@@ -348,6 +366,8 @@ The spec requires k ≥ 3 groups for a valid one-way ANOVA. k = 2 is mathematica
 Use `CAST(STATS_ANOVA(...) AS CHAR)` to read results in the mysql CLI.
 
 ### Skewness Family
+
+![Negative and positive skew diagrams](images/skewness.svg)
 
 | Function | Returns | Description |
 |---|---|---|
