@@ -515,30 +515,34 @@ static std::optional<double> compute_ztest(const ZTestState &s) {
   return (mean - s.mu) / (s.sigma / std::sqrt(static_cast<double>(s.n)));
 }
 
-static void stats_ztest_z_result(const ZTestState &s, RealResult out) try {
+// p_one_tail: P(Z > z) = 0.5×erfc(z/√2) — upper-tail; > 0.5 when sample mean < μ.
+// p_two_tail: P(|Z| > z) = erfc(|z|/√2).
+static void stats_ztest_json_result(const ZTestState &s, StringResult out) try {
   const auto z = compute_ztest(s);
   if (!z) { out.set_null(); return; }
-  out.set(*z);
-} catch (...) { out.error("STATS_ZTEST_Z: unexpected error"); }
 
-// Upper-tail probability: P(Z > z) = 0.5 × erfc(z/√2).
-// Returns values in (0.5, 1] when z < 0 (sample mean below μ).
-static void stats_ztest_p_one_tail_result(const ZTestState &s, RealResult out) try {
-  const auto z = compute_ztest(s);
-  if (!z) { out.set_null(); return; }
-  out.set(0.5 * std::erfc(*z / std::sqrt(2.0)));
-} catch (...) { out.error("STATS_ZTEST_P_ONE_TAIL: unexpected error"); }
+  std::string json;
+  json.reserve(128);
 
-static void stats_ztest_p_two_tail_result(const ZTestState &s, RealResult out) try {
-  const auto z = compute_ztest(s);
-  if (!z) { out.set_null(); return; }
-  out.set(std::erfc(std::fabs(*z) / std::sqrt(2.0)));
-} catch (...) { out.error("STATS_ZTEST_P_TWO_TAIL: unexpected error"); }
+  auto append = [&](const char *key, double val) {
+    json += '"'; json += key; json += "\":";
+    json += fmt_no_exp(val);
+  };
 
-template<auto ResultFn>
-static constexpr auto make_ztest_func(const char *name) {
-  return vsql::make_aggregate_func<ZTestState, ResultFn>(name)
-    .returns(vsql::REAL)
+  json += '{';
+  append("z",          *z);
+  json += ',';
+  append("p_one_tail", 0.5 * std::erfc(*z / std::sqrt(2.0)));
+  json += ',';
+  append("p_two_tail", std::erfc(std::fabs(*z) / std::sqrt(2.0)));
+  json += '}';
+
+  out.set(json);
+} catch (...) { out.error("STATS_ZTEST: unexpected error"); }
+
+static constexpr auto make_ztest_json_func(const char *name) {
+  return vsql::make_aggregate_func<ZTestState, &stats_ztest_json_result>(name)
+    .returns(vsql::STRING)
     .param(vsql::REAL)
     .param(vsql::REAL)
     .param(vsql::REAL)
@@ -1127,9 +1131,7 @@ VEF_GENERATE_ENTRY_POINTS(
     .func(make_ttest_groups_func("STATS_TTEST_GROUPS"))
     .func(make_mode_json_func("STATS_MODE"))
     .func(make_skewness_json_func("STATS_SKEWNESS"))
-    .func(make_ztest_func<&stats_ztest_z_result>("STATS_ZTEST_Z"))
-    .func(make_ztest_func<&stats_ztest_p_one_tail_result>("STATS_ZTEST_P_ONE_TAIL"))
-    .func(make_ztest_func<&stats_ztest_p_two_tail_result>("STATS_ZTEST_P_TWO_TAIL"))
+    .func(make_ztest_json_func("STATS_ZTEST"))
     .func(make_chisq_gof_json_func("STATS_CHISQ_GOF"))
     .func(make_chisq_indep_json_func("STATS_CHISQ_INDEP"))
     .func(make_kurtosis_json_func("STATS_KURTOSIS"))

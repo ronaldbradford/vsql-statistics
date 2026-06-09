@@ -1,7 +1,9 @@
+# vsql_statistics: one-sample z-test aggregate function
 INSTALL EXTENSION vsql_statistics;
 CREATE DATABASE IF NOT EXISTS vsql_test;
 USE vsql_test;
 CREATE TABLE ztest_data (val DOUBLE);
+# --- Spec reference: n=40, mean=511.0775, mu=500, sigma=40 → Z≈1.7515, p_two≈0.0799 ---
 INSERT INTO ztest_data VALUES
 (511.0775),(511.0775),(511.0775),(511.0775),(511.0775),
 (511.0775),(511.0775),(511.0775),(511.0775),(511.0775),
@@ -11,78 +13,57 @@ INSERT INTO ztest_data VALUES
 (511.0775),(511.0775),(511.0775),(511.0775),(511.0775),
 (511.0775),(511.0775),(511.0775),(511.0775),(511.0775),
 (511.0775),(511.0775),(511.0775),(511.0775),(511.0775);
-SELECT ROUND(STATS_ZTEST_Z(val, 500.0, 40.0), 4)            AS z         FROM ztest_data;
-z
-1.7515
-SELECT ROUND(STATS_ZTEST_P_TWO_TAIL(val, 500.0, 40.0), 4)   AS p_two     FROM ztest_data;
-p_two
-0.0799
-SELECT ROUND(STATS_ZTEST_P_ONE_TAIL(val, 500.0, 40.0), 4)   AS p_one     FROM ztest_data;
-p_one
-0.0399
+SELECT CAST(STATS_ZTEST(val, 500.0, 40.0) AS CHAR) AS ztest FROM ztest_data;
+ztest
+{"z":1.75150653902571,"p_one_tail":0.0399293479572078,"p_two_tail":0.0798586959144155}
 DELETE FROM ztest_data;
+# --- Hand-verifiable: 4 equal values, mu=3, sigma=2 → Z=(4-3)/(2/2)=1.0 ---
 INSERT INTO ztest_data VALUES (4),(4),(4),(4);
-SELECT STATS_ZTEST_Z(val, 3.0, 2.0)            AS z         FROM ztest_data;
-z
-1
-SELECT STATS_ZTEST_P_TWO_TAIL(val, 3.0, 2.0)   AS p_two     FROM ztest_data;
-p_two
-0.3173105078629141
-SELECT STATS_ZTEST_P_ONE_TAIL(val, 3.0, 2.0)   AS p_one     FROM ztest_data;
-p_one
-0.15865525393145705
+SELECT CAST(STATS_ZTEST(val, 3.0, 2.0) AS CHAR) AS ztest FROM ztest_data;
+ztest
+{"z":1,"p_one_tail":0.158655253931457,"p_two_tail":0.317310507862914}
 DELETE FROM ztest_data;
+# --- Single row: n=1 produces a valid Z-score (unlike t-test which requires n>=2) ---
 INSERT INTO ztest_data VALUES (510.0);
-SELECT ROUND(STATS_ZTEST_Z(val, 500.0, 40.0), 4) AS z FROM ztest_data;
-z
-0.25
+SELECT CAST(STATS_ZTEST(val, 500.0, 40.0) AS CHAR) AS ztest FROM ztest_data;
+ztest
+{"z":0.25,"p_one_tail":0.401293674317076,"p_two_tail":0.802587348634153}
 DELETE FROM ztest_data;
+# --- All-NULL: returns NULL ---
 INSERT INTO ztest_data VALUES (NULL),(NULL),(NULL);
-SELECT STATS_ZTEST_Z(val, 500.0, 40.0)            AS z     FROM ztest_data;
-z
-NULL
-SELECT STATS_ZTEST_P_ONE_TAIL(val, 500.0, 40.0)   AS p_one FROM ztest_data;
-p_one
-NULL
-SELECT STATS_ZTEST_P_TWO_TAIL(val, 500.0, 40.0)   AS p_two FROM ztest_data;
-p_two
+SELECT CAST(STATS_ZTEST(val, 500.0, 40.0) AS CHAR) AS ztest FROM ztest_data;
+ztest
 NULL
 DELETE FROM ztest_data;
+# --- sigma=0: returns NULL ---
 INSERT INTO ztest_data VALUES (510.0),(520.0),(530.0);
-SELECT STATS_ZTEST_Z(val, 500.0, 0.0)            AS z     FROM ztest_data;
-z
-NULL
-SELECT STATS_ZTEST_P_ONE_TAIL(val, 500.0, 0.0)   AS p_one FROM ztest_data;
-p_one
-NULL
-SELECT STATS_ZTEST_P_TWO_TAIL(val, 500.0, 0.0)   AS p_two FROM ztest_data;
-p_two
+SELECT CAST(STATS_ZTEST(val, 500.0, 0.0) AS CHAR) AS ztest FROM ztest_data;
+ztest
 NULL
 DELETE FROM ztest_data;
+# --- Negative Z (mean < mu): p_one_tail > 0.5 ---
 INSERT INTO ztest_data VALUES (490.0),(490.0),(490.0),(490.0);
-SELECT STATS_ZTEST_Z(val, 500.0, 2.0)          AS z         FROM ztest_data;
-z
--10
-SELECT STATS_ZTEST_P_TWO_TAIL(val, 500.0, 2.0) AS p_two     FROM ztest_data;
-p_two
-1.5239706048321186e-23
-SELECT STATS_ZTEST_P_ONE_TAIL(val, 500.0, 2.0) > 0.5 AS p_one_gt_half FROM ztest_data;
+SELECT CAST(STATS_ZTEST(val, 500.0, 2.0) AS CHAR) AS ztest FROM ztest_data;
+ztest
+{"z":-10,"p_one_tail":1,"p_two_tail":0.0}
+SELECT JSON_VALUE(CAST(STATS_ZTEST(val, 500.0, 2.0) AS CHAR), '$.p_one_tail') + 0 > 0.5
+AS p_one_gt_half FROM ztest_data;
 p_one_gt_half
 1
 DELETE FROM ztest_data;
+# --- GROUP BY: Z-test computed independently per group ---
 CREATE TABLE vsql_test.ztest_grouped (grp INT, val DOUBLE);
 INSERT INTO ztest_grouped VALUES
 (1,4),(1,4),(1,4),(1,4),
 (2,3),(2,3),(2,3),(2,3),(2,3),(2,3),(2,3),(2,3),(2,3);
 SELECT grp,
-STATS_ZTEST_Z(val, 3.0, 2.0)            AS z,
-STATS_ZTEST_P_TWO_TAIL(val, 3.0, 2.0)   AS p_two
+CAST(STATS_ZTEST(val, 3.0, 2.0) AS CHAR) AS ztest
 FROM vsql_test.ztest_grouped
 GROUP BY grp
 ORDER BY grp;
-grp	z	p_two
-1	1	0.3173105078629141
-2	0	1
+grp	ztest
+1	{"z":1,"p_one_tail":0.158655253931457,"p_two_tail":0.317310507862914}
+2	{"z":0,"p_one_tail":0.5,"p_two_tail":1}
 DROP TABLE vsql_test.ztest_grouped;
 DROP TABLE ztest_data;
 DROP DATABASE vsql_test;

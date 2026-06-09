@@ -12,7 +12,7 @@ This file provides guidance to AI coding assistants when working with code in th
 - **Two-sample t-test family (2 JSON functions):** `STATS_TTEST`, `STATS_TTEST_GROUPS`
 - **Mode family (1 JSON function):** `STATS_MODE`
 - **Skewness family (1 JSON function):** `STATS_SKEWNESS`
-- **Z-test family (3 functions):** `STATS_ZTEST_Z`, `STATS_ZTEST_P_ONE_TAIL`, `STATS_ZTEST_P_TWO_TAIL`
+- **Z-test family (1 JSON function):** `STATS_ZTEST`
 - **Chi-squared family (2 JSON functions):** `STATS_CHISQ_GOF`, `STATS_CHISQ_INDEP`
 - **Kurtosis family (1 JSON function):** `STATS_KURTOSIS`
 - **Covariance family (2 functions):** `STATS_COVARIANCE_POP`, `STATS_COVARIANCE_SAMP`
@@ -51,7 +51,7 @@ The mode family (1 JSON function) uses `ModeState` with `std::unordered_map<doub
 
 The skewness family (1 JSON function) uses `StatsState` (vector of doubles). `STATS_SKEWNESS(col)` returns a JSON STRING `{"moment": ..., "pearson": ...}` where `moment` is the population skewness g₁ = m₃/m₂^(3/2) and `pearson` is 3×(mean−median)/σ. Both fields are `null` when variance is zero. The function returns NULL when n < 2. Use `CAST(... AS CHAR)` and `JSON_EXTRACT` to access individual fields.
 
-The z-test family (3 functions) uses `ZTestState` — streaming accumulator of n and Σx, plus stored `mu` and `sigma` constants (last non-null wins per row; sigma defaults to 0.0 so all-null sigma returns NULL). `STATS_ZTEST_P_ONE_TAIL` returns the upper-tail probability P(Z > z), which is > 0.5 when the sample mean is below μ. All three return NULL when n=0, sigma≤0, or sigma is NaN.
+The z-test family (1 JSON function) uses `ZTestState` — streaming accumulator of n and Σx, plus stored `mu` and `sigma` constants (last non-null wins per row; sigma defaults to 0.0 so all-null sigma returns NULL). `STATS_ZTEST(value, mu, sigma)` returns a JSON STRING `{"z":..., "p_one_tail":..., "p_two_tail":...}` where `p_one_tail` is P(Z > z) (upper-tail; > 0.5 when sample mean < μ) and `p_two_tail` is P(|Z| > z). Returns NULL when n=0, sigma≤0, or sigma is NaN. Use `CAST(... AS CHAR)` to read results in the mysql CLI.
 
 The kurtosis family (1 JSON function) uses `KurtState` — a streaming accumulator of n, Σ(xi−ref), Σ(xi−ref)², Σ(xi−ref)³, Σ(xi−ref)⁴ (shifted by the first observed value for numerical stability). `STATS_KURTOSIS(col)` returns a JSON STRING `{"kurtosis": ..., "excess": ...}` where `kurtosis` is β₂ (n ≥ 2) and `excess` is the Fisher-Pearson unbiased g₂ (n ≥ 4; null when n < 4). Both fields are null for zero variance. The function returns NULL when n < 2. A normal distribution has β₂ = 3 and g₂ = 0.
 
@@ -71,7 +71,7 @@ The covariance family (2 functions) uses `CovState` — a streaming accumulator 
 **Function registration:** `make_aggregate_func<StatsState, &result_fn>(name).returns(REAL).param(REAL).clear<&stats_clear>().accumulate<&stats_accumulate>().build()`
 
 **Key files:**
-- `src/vsql_statistics.cc` — all 29 aggregate functions (6 IQR + 2 t-test + 1 mode + 1 skewness + 3 z-test + 2 chi-squared + 1 kurtosis + 2 covariance + 4 means + 9 ANOVA)
+- `src/vsql_statistics.cc` — all 29 aggregate functions (6 IQR + 2 t-test + 1 mode + 1 skewness + 1 z-test + 2 chi-squared + 1 kurtosis + 2 covariance + 4 means + 9 ANOVA)
 - `manifest.json` — extension metadata
 - `CMakeLists.txt` — build configuration
 - `cmake/FindVillageSQL.cmake` — SDK discovery
@@ -108,8 +108,7 @@ SELECT CAST(STATS_TTEST(value, grp, 0.05) AS CHAR) FROM t;
 SELECT CAST(STATS_TTEST_GROUPS(value, grp) AS CHAR) FROM t;
 SELECT CAST(STATS_MODE(CAST(col AS DOUBLE)) AS CHAR) FROM t;
 SELECT CAST(STATS_SKEWNESS(col) AS CHAR) FROM t;
-SELECT STATS_ZTEST_Z(col, 500.0, 40.0) FROM t;
-SELECT STATS_ZTEST_P_TWO_TAIL(col, 500.0, 40.0) FROM t;
+SELECT CAST(STATS_ZTEST(col, 500.0, 40.0) AS CHAR) FROM t;
 SELECT CAST(STATS_CHISQ_GOF(observed, expected) AS CHAR) FROM t;
 SELECT CAST(STATS_CHISQ_INDEP(observed, expected, 2.0, 3.0) AS CHAR) FROM t;
 UNINSTALL EXTENSION vsql_statistics;

@@ -10,15 +10,15 @@ Statistical aggregate functions for data scientists — IQR, quartiles, outlier 
 | **T-test** | 2 | `STATS_TTEST`, `STATS_TTEST_GROUPS` |
 | **Mode** | 1 | `STATS_MODE` |
 | **Skewness** | 1 | `STATS_SKEWNESS` |
-| **Z-test** | 3 | `STATS_ZTEST_Z`, `STATS_ZTEST_P_ONE_TAIL`, `STATS_ZTEST_P_TWO_TAIL` |
+| **Z-test** | 1 | `STATS_ZTEST` |
 | **Chi-squared** | 2 | `STATS_CHISQ_GOF`, `STATS_CHISQ_INDEP` |
 | **Kurtosis** | 1 | `STATS_KURTOSIS` |
 | **Covariance** | 2 | `STATS_COVARIANCE_POP`, `STATS_COVARIANCE_SAMP` |
 | **Means** | 4 | `STATS_MEAN_TRIMMED`, `STATS_MEAN_WINSORIZED`, `STATS_MEAN_GEOMETRIC`, `STATS_MEAN_HARMONIC` |
 | **ANOVA** | 9 | `STATS_ANOVA_F`, `STATS_ANOVA_P`, `STATS_ANOVA_SSB`, `STATS_ANOVA_SSW`, `STATS_ANOVA_SST`, `STATS_ANOVA_MSB`, `STATS_ANOVA_MSW`, `STATS_ANOVA_DFB`, `STATS_ANOVA_DFW` |
-| **Total** | **31** | |
+| **Total** | **29** | |
 
-> **Beta notice:** All functions in this extension (`STATS_IQR`, `STATS_TTEST`, `STATS_TTEST_GROUPS`, `STATS_MODE`, `STATS_SKEWNESS`, `STATS_ZTEST_*`, `STATS_CHISQ_*`, `STATS_KURTOSIS`, `STATS_COVARIANCE_*`, `STATS_MEAN_*`, `STATS_ANOVA_*`) are beta quality. They are functionally correct on the tested datasets but have not been validated at production scale. Use with caution in high-volume or precision-critical workloads and report any anomalies.
+> **Beta notice:** All functions in this extension (`STATS_IQR`, `STATS_TTEST`, `STATS_TTEST_GROUPS`, `STATS_MODE`, `STATS_SKEWNESS`, `STATS_ZTEST`, `STATS_CHISQ_*`, `STATS_KURTOSIS`, `STATS_COVARIANCE_*`, `STATS_MEAN_*`, `STATS_ANOVA_*`) are beta quality. They are functionally correct on the tested datasets but have not been validated at production scale. Use with caution in high-volume or precision-critical workloads and report any anomalies.
 
 
 ## Installing
@@ -77,10 +77,10 @@ SELECT JSON_EXTRACT(json, '$.moment') AS skewness_moment,
 FROM s;
 
 -- One-sample z-test: is this batch's mean consistent with the known population?
-SELECT
-  STATS_ZTEST_Z(measurement, 500.0, 40.0)            AS z_stat,
-  STATS_ZTEST_P_TWO_TAIL(measurement, 500.0, 40.0)   AS p_value
-FROM quality_checks;
+WITH z AS (SELECT CAST(STATS_ZTEST(measurement, 500.0, 40.0) AS CHAR(200)) AS json FROM quality_checks)
+SELECT JSON_EXTRACT(json, '$.z')           AS z_stat,
+       JSON_EXTRACT(json, '$.p_two_tail')  AS p_value
+FROM z;
 
 -- Kurtosis: measure tail heaviness (kurtosis=β₂, excess=g₂ Fisher-Pearson)
 WITH k AS (SELECT CAST(STATS_KURTOSIS(return_pct) AS CHAR(200)) AS json FROM asset_returns)
@@ -205,21 +205,23 @@ Use `CAST(col AS DOUBLE)` on INT columns — without it the JSON values will be 
 
 ### One-Sample Z-Test Family (known population mean and standard deviation)
 
-All three functions take `(value, mu, sigma)` where `mu` and `sigma` are the known population mean and standard deviation respectively.
+`STATS_ZTEST(value, mu, sigma)` takes the known population mean `mu` and standard deviation `sigma`, and returns a JSON STRING with three fields:
 
-| Function | Returns | Description |
-|---|---|---|
-| `STATS_ZTEST_Z(value, mu, sigma)` | `DOUBLE` | Z-statistic: (x̄ − μ) / (σ / √n) |
-| `STATS_ZTEST_P_ONE_TAIL(value, mu, sigma)` | `DOUBLE` | Upper-tail probability: P(Z > z) |
-| `STATS_ZTEST_P_TWO_TAIL(value, mu, sigma)` | `DOUBLE` | Two-tail probability: P(\|Z\| > \|z\|) |
+| Field | Description |
+|---|---|
+| `z` | Z-statistic: (x̄ − μ) / (σ / √n) |
+| `p_one_tail` | Upper-tail probability: P(Z > z) |
+| `p_two_tail` | Two-tail probability: P(\|Z\| > \|z\|) |
 
-All z-test functions:
-- Skip NULL values in the `value` column; return NULL for an all-NULL group
-- Return NULL when `sigma` ≤ 0 or was never supplied (all-NULL sigma column)
-- Return NULL when `sigma` is NaN
-- Work with `GROUP BY`
+`STATS_ZTEST`:
+- Skips NULL values in the `value` column; returns NULL for an all-NULL group
+- Returns NULL when `sigma` ≤ 0 or was never supplied (all-NULL sigma column)
+- Returns NULL when `sigma` is NaN
+- Works with `GROUP BY`
 
-`STATS_ZTEST_P_ONE_TAIL` returns the upper-tail probability P(Z > z). When the sample mean is below μ (z < 0), this returns a value > 0.5 — indicating evidence against the upper-tail alternative. Use `STATS_ZTEST_P_TWO_TAIL` when you are testing for any deviation from μ rather than a directional hypothesis.
+`p_one_tail` is the upper-tail probability P(Z > z). When the sample mean is below μ (z < 0), this returns a value > 0.5 — indicating evidence against the upper-tail alternative. Use `p_two_tail` when you are testing for any deviation from μ rather than a directional hypothesis.
+
+Use `CAST(STATS_ZTEST(...) AS CHAR)` to read results in the mysql CLI.
 
 ### Kurtosis Family
 
