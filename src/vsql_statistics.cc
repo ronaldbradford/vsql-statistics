@@ -831,22 +831,23 @@ static void cov_accumulate(CovState &s, RealArg x, RealArg y) {
   s.C += dx * (yv - s.mean_y);  // uses updated mean_y — Welford's co-moment form
 }
 
-// Population covariance σ_xy = C/n. N=1 yields 0.0; N=0 yields NULL.
-static void stats_cov_pop_result(const CovState &s, RealResult out) try {
+// pop = C/n (0.0 for n=1); samp = C/(n-1) (null for n<2); whole result NULL for n=0.
+static void stats_cov_json_result(const CovState &s, StringResult out) try {
   if (s.n == 0) { out.set_null(); return; }
-  out.set(s.C / static_cast<double>(s.n));
-} catch (...) { out.error("STATS_COVARIANCE_POP: unexpected error"); }
+  const double dn = static_cast<double>(s.n);
+  std::string json;
+  json.reserve(64);
+  json += "{\"pop\":";
+  json += fmt_no_exp(s.C / dn);
+  json += ",\"samp\":";
+  json += (s.n >= 2) ? fmt_no_exp(s.C / (dn - 1.0)) : "null";
+  json += '}';
+  out.set(json);
+} catch (...) { out.error("STATS_COVARIANCE: unexpected error"); }
 
-// Sample covariance s_xy = C/(n−1). Returns NULL for n < 2.
-static void stats_cov_samp_result(const CovState &s, RealResult out) try {
-  if (s.n < 2) { out.set_null(); return; }
-  out.set(s.C / static_cast<double>(s.n - 1));
-} catch (...) { out.error("STATS_COVARIANCE_SAMP: unexpected error"); }
-
-template<auto ResultFn>
-static constexpr auto make_cov_func(const char *name) {
-  return vsql::make_aggregate_func<CovState, ResultFn>(name)
-    .returns(vsql::REAL)
+static constexpr auto make_cov_json_func(const char *name) {
+  return vsql::make_aggregate_func<CovState, &stats_cov_json_result>(name)
+    .returns(vsql::STRING)
     .param(vsql::REAL)
     .param(vsql::REAL)
     .template clear<&cov_clear>()
@@ -1135,8 +1136,7 @@ VEF_GENERATE_ENTRY_POINTS(
     .func(make_chisq_gof_json_func("STATS_CHISQ_GOF"))
     .func(make_chisq_indep_json_func("STATS_CHISQ_INDEP"))
     .func(make_kurtosis_json_func("STATS_KURTOSIS"))
-    .func(make_cov_func<&stats_cov_pop_result>("STATS_COVARIANCE_POP"))
-    .func(make_cov_func<&stats_cov_samp_result>("STATS_COVARIANCE_SAMP"))
+    .func(make_cov_json_func("STATS_COVARIANCE"))
     .func(make_mean_trim_func<&stats_mean_trimmed_result>("STATS_MEAN_TRIMMED"))
     .func(make_mean_trim_func<&stats_mean_winsorized_result>("STATS_MEAN_WINSORIZED"))
     .func(make_mean_geo_func<&stats_mean_geometric_result>("STATS_MEAN_GEOMETRIC"))

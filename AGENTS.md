@@ -15,7 +15,7 @@ This file provides guidance to AI coding assistants when working with code in th
 - **Z-test family (1 JSON function):** `STATS_ZTEST`
 - **Chi-squared family (2 JSON functions):** `STATS_CHISQ_GOF`, `STATS_CHISQ_INDEP`
 - **Kurtosis family (1 JSON function):** `STATS_KURTOSIS`
-- **Covariance family (2 functions):** `STATS_COVARIANCE_POP`, `STATS_COVARIANCE_SAMP`
+- **Covariance family (1 JSON function):** `STATS_COVARIANCE`
 - **Means family — beta (4 functions):** `STATS_MEAN_TRIMMED`, `STATS_MEAN_WINSORIZED`, `STATS_MEAN_GEOMETRIC`, `STATS_MEAN_HARMONIC`
 
 All functions operate on `DOUBLE` columns and are usable with `GROUP BY`, mirroring statistical primitives found in Python (numpy/scipy) and R.
@@ -53,6 +53,8 @@ The skewness family (1 JSON function) uses `StatsState` (vector of doubles). `ST
 
 The z-test family (1 JSON function) uses `ZTestState` — streaming accumulator of n and Σx, plus stored `mu` and `sigma` constants (last non-null wins per row; sigma defaults to 0.0 so all-null sigma returns NULL). `STATS_ZTEST(value, mu, sigma)` returns a JSON STRING `{"z":..., "p_one_tail":..., "p_two_tail":...}` where `p_one_tail` is P(Z > z) (upper-tail; > 0.5 when sample mean < μ) and `p_two_tail` is P(|Z| > z). Returns NULL when n=0, sigma≤0, or sigma is NaN. Use `CAST(... AS CHAR)` to read results in the mysql CLI.
 
+The covariance family (1 JSON function) uses `CovState` — a streaming accumulator of n, mean_x, mean_y, and C (Welford's co-moment). `STATS_COVARIANCE(x, y)` returns a JSON STRING `{"pop":..., "samp":...}` where `pop` is σ_xy = C/n (0.0 for n=1) and `samp` is s_xy = C/(n−1) (null when n < 2). Returns NULL when n=0. A row is skipped if either argument is NULL or NaN. Use `CAST(... AS CHAR)` to read results in the mysql CLI.
+
 The kurtosis family (1 JSON function) uses `KurtState` — a streaming accumulator of n, Σ(xi−ref), Σ(xi−ref)², Σ(xi−ref)³, Σ(xi−ref)⁴ (shifted by the first observed value for numerical stability). `STATS_KURTOSIS(col)` returns a JSON STRING `{"kurtosis": ..., "excess": ...}` where `kurtosis` is β₂ (n ≥ 2) and `excess` is the Fisher-Pearson unbiased g₂ (n ≥ 4; null when n < 4). Both fields are null for zero variance. The function returns NULL when n < 2. A normal distribution has β₂ = 3 and g₂ = 0.
 
 The means family (4 functions — beta) uses three states. `MeanTrimState` (vector + trim_pct) serves both `STATS_MEAN_TRIMMED` and `STATS_MEAN_WINSORIZED` (2-param functions). `MeanGeoState` (n, sum_log) is a streaming accumulator for `STATS_MEAN_GEOMETRIC`: accumulates Σln(xi) for positive values, then returns exp(sum_log/n). `MeanHarmState` (n, sum_recip) is a streaming accumulator for `STATS_MEAN_HARMONIC`: accumulates Σ(1/xi) for positive values, then returns n/sum_recip. Non-positive inputs are silently skipped for both geometric and harmonic.
@@ -71,7 +73,7 @@ The covariance family (2 functions) uses `CovState` — a streaming accumulator 
 **Function registration:** `make_aggregate_func<StatsState, &result_fn>(name).returns(REAL).param(REAL).clear<&stats_clear>().accumulate<&stats_accumulate>().build()`
 
 **Key files:**
-- `src/vsql_statistics.cc` — all 29 aggregate functions (6 IQR + 2 t-test + 1 mode + 1 skewness + 1 z-test + 2 chi-squared + 1 kurtosis + 2 covariance + 4 means + 9 ANOVA)
+- `src/vsql_statistics.cc` — all 28 aggregate functions (6 IQR + 2 t-test + 1 mode + 1 skewness + 1 z-test + 2 chi-squared + 1 kurtosis + 1 covariance + 4 means + 9 ANOVA)
 - `manifest.json` — extension metadata
 - `CMakeLists.txt` — build configuration
 - `cmake/FindVillageSQL.cmake` — SDK discovery
@@ -109,6 +111,7 @@ SELECT CAST(STATS_TTEST_GROUPS(value, grp) AS CHAR) FROM t;
 SELECT CAST(STATS_MODE(CAST(col AS DOUBLE)) AS CHAR) FROM t;
 SELECT CAST(STATS_SKEWNESS(col) AS CHAR) FROM t;
 SELECT CAST(STATS_ZTEST(col, 500.0, 40.0) AS CHAR) FROM t;
+SELECT CAST(STATS_COVARIANCE(x, y) AS CHAR) FROM t;
 SELECT CAST(STATS_CHISQ_GOF(observed, expected) AS CHAR) FROM t;
 SELECT CAST(STATS_CHISQ_INDEP(observed, expected, 2.0, 3.0) AS CHAR) FROM t;
 UNINSTALL EXTENSION vsql_statistics;

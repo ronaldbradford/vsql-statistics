@@ -1,56 +1,52 @@
-# vsql_statistics: population covariance and sample covariance
+--echo # vsql_statistics: covariance aggregate function
+
 INSTALL EXTENSION vsql_statistics;
 CREATE DATABASE IF NOT EXISTS vsql_test;
 USE vsql_test;
 
-# --- Spec Example 1: positive covariance X={2,4,6} Y={5,10,12}, n=3 ---
-# σ_xy = 14/3 ≈ 4.6667; s_xy = 14/2 = 7.0
 CREATE TABLE cov_data (x DOUBLE, y DOUBLE);
+
+--echo # --- Spec Example 1: positive covariance X={2,4,6} Y={5,10,12}, n=3 ---
+--echo # pop=14/3≈4.6667, samp=14/2=7.0
 INSERT INTO cov_data VALUES (2,5),(4,10),(6,12);
-SELECT ROUND(STATS_COVARIANCE_POP(x, y), 4)  AS pop_covariance  FROM cov_data;
-SELECT ROUND(STATS_COVARIANCE_SAMP(x, y), 4) AS samp_covariance FROM cov_data;
-
-# --- Spec Example 2: negative covariance X={1,3,5} Y={20,15,10}, n=3 ---
-# σ_xy = -20/3 ≈ -6.6667; s_xy = -20/2 = -10.0
+SELECT CAST(STATS_COVARIANCE(x, y) AS CHAR) AS covariance FROM cov_data;
 DELETE FROM cov_data;
+
+--echo # --- Spec Example 2: negative covariance X={1,3,5} Y={20,15,10}, n=3 ---
+--echo # pop=-20/3≈-6.6667, samp=-20/2=-10.0
 INSERT INTO cov_data VALUES (1,20),(3,15),(5,10);
-SELECT ROUND(STATS_COVARIANCE_POP(x, y), 4)  AS pop_covariance  FROM cov_data;
-SELECT ROUND(STATS_COVARIANCE_SAMP(x, y), 4) AS samp_covariance FROM cov_data;
-
-# --- Perfectly correlated X={1,2,3,4,5} Y={2,4,6,8,10}: pop=4.0, samp=5.0 ---
+SELECT CAST(STATS_COVARIANCE(x, y) AS CHAR) AS covariance FROM cov_data;
 DELETE FROM cov_data;
+
+--echo # --- Perfectly correlated X={1,2,3,4,5} Y={2,4,6,8,10}: pop=4.0, samp=5.0 ---
 INSERT INTO cov_data VALUES (1,2),(2,4),(3,6),(4,8),(5,10);
-SELECT ROUND(STATS_COVARIANCE_POP(x, y), 4)  AS pop_covariance  FROM cov_data;
-SELECT ROUND(STATS_COVARIANCE_SAMP(x, y), 4) AS samp_covariance FROM cov_data;
-
-# --- n=1: pop returns 0.0 (spec §3); samp returns NULL (n < 2) ---
+SELECT CAST(STATS_COVARIANCE(x, y) AS CHAR) AS covariance FROM cov_data;
 DELETE FROM cov_data;
+
+--echo # --- n=1: pop=0.0, samp=null ---
 INSERT INTO cov_data VALUES (3,7);
-SELECT STATS_COVARIANCE_POP(x, y)  AS pop_single  FROM cov_data;
-SELECT STATS_COVARIANCE_SAMP(x, y) AS samp_single FROM cov_data;
-
-# --- All NULL: both functions return NULL ---
+SELECT CAST(STATS_COVARIANCE(x, y) AS CHAR) AS covariance FROM cov_data;
 DELETE FROM cov_data;
+
+--echo # --- All-NULL: returns NULL ---
 INSERT INTO cov_data VALUES (NULL,NULL),(NULL,NULL);
-SELECT STATS_COVARIANCE_POP(x, y)  AS pop_null  FROM cov_data;
-SELECT STATS_COVARIANCE_SAMP(x, y) AS samp_null FROM cov_data;
-
-# --- NULL pair skipping: (2,5) kept; (NULL,10) and (6,NULL) dropped → n=1 ---
+SELECT CAST(STATS_COVARIANCE(x, y) AS CHAR) AS covariance FROM cov_data;
 DELETE FROM cov_data;
+
+--echo # --- NULL pair skipping: (2,5) kept; (NULL,10) and (6,NULL) dropped → n=1 ---
 INSERT INTO cov_data VALUES (2,5),(NULL,10),(6,NULL);
-SELECT STATS_COVARIANCE_POP(x, y)  AS pop_skip  FROM cov_data;
-SELECT STATS_COVARIANCE_SAMP(x, y) AS samp_skip FROM cov_data;
+SELECT CAST(STATS_COVARIANCE(x, y) AS CHAR) AS covariance FROM cov_data;
+DELETE FROM cov_data;
 
 DROP TABLE cov_data;
 
-# --- GROUP BY: covariance computed independently per group ---
+--echo # --- GROUP BY: covariance computed independently per group ---
 CREATE TABLE vsql_test.cov_grouped (grp INT, x DOUBLE, y DOUBLE);
 INSERT INTO cov_grouped VALUES
   (1, 2,5),(1, 4,10),(1, 6,12),
   (2, 1,20),(2, 3,15),(2, 5,10);
 SELECT grp,
-  ROUND(STATS_COVARIANCE_POP(x, y), 4)  AS pop_covariance,
-  ROUND(STATS_COVARIANCE_SAMP(x, y), 4) AS samp_covariance
+       CAST(STATS_COVARIANCE(x, y) AS CHAR) AS covariance
 FROM vsql_test.cov_grouped
 GROUP BY grp
 ORDER BY grp;

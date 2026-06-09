@@ -13,12 +13,12 @@ Statistical aggregate functions for data scientists — IQR, quartiles, outlier 
 | **Z-test** | 1 | `STATS_ZTEST` |
 | **Chi-squared** | 2 | `STATS_CHISQ_GOF`, `STATS_CHISQ_INDEP` |
 | **Kurtosis** | 1 | `STATS_KURTOSIS` |
-| **Covariance** | 2 | `STATS_COVARIANCE_POP`, `STATS_COVARIANCE_SAMP` |
+| **Covariance** | 1 | `STATS_COVARIANCE` |
 | **Means** | 4 | `STATS_MEAN_TRIMMED`, `STATS_MEAN_WINSORIZED`, `STATS_MEAN_GEOMETRIC`, `STATS_MEAN_HARMONIC` |
 | **ANOVA** | 9 | `STATS_ANOVA_F`, `STATS_ANOVA_P`, `STATS_ANOVA_SSB`, `STATS_ANOVA_SSW`, `STATS_ANOVA_SST`, `STATS_ANOVA_MSB`, `STATS_ANOVA_MSW`, `STATS_ANOVA_DFB`, `STATS_ANOVA_DFW` |
-| **Total** | **29** | |
+| **Total** | **28** | |
 
-> **Beta notice:** All functions in this extension (`STATS_IQR`, `STATS_TTEST`, `STATS_TTEST_GROUPS`, `STATS_MODE`, `STATS_SKEWNESS`, `STATS_ZTEST`, `STATS_CHISQ_*`, `STATS_KURTOSIS`, `STATS_COVARIANCE_*`, `STATS_MEAN_*`, `STATS_ANOVA_*`) are beta quality. They are functionally correct on the tested datasets but have not been validated at production scale. Use with caution in high-volume or precision-critical workloads and report any anomalies.
+> **Beta notice:** All functions in this extension (`STATS_IQR`, `STATS_TTEST`, `STATS_TTEST_GROUPS`, `STATS_MODE`, `STATS_SKEWNESS`, `STATS_ZTEST`, `STATS_CHISQ_*`, `STATS_KURTOSIS`, `STATS_COVARIANCE`, `STATS_MEAN_*`, `STATS_ANOVA_*`) are beta quality. They are functionally correct on the tested datasets but have not been validated at production scale. Use with caution in high-volume or precision-critical workloads and report any anomalies.
 
 
 ## Installing
@@ -89,9 +89,10 @@ SELECT JSON_EXTRACT(json, '$.kurtosis') AS pop_kurtosis,
 FROM k;
 
 -- Covariance: do advertising spend and revenue move together?
-SELECT STATS_COVARIANCE_POP(ad_spend, revenue)  AS cov_pop,
-       STATS_COVARIANCE_SAMP(ad_spend, revenue) AS cov_samp
-FROM monthly_results;
+WITH c AS (SELECT CAST(STATS_COVARIANCE(ad_spend, revenue) AS CHAR(200)) AS json FROM monthly_results)
+SELECT JSON_EXTRACT(json, '$.pop')  AS cov_pop,
+       JSON_EXTRACT(json, '$.samp') AS cov_samp
+FROM c;
 
 -- Trimmed mean: reduce outlier influence by discarding extremes
 SELECT STATS_MEAN_TRIMMED(sale_amount, 0.1) AS robust_mean FROM daily_sales;
@@ -246,22 +247,22 @@ Interpretation: normal distribution has β₂ = 3 and g₂ = 0. Positive excess 
 
 ### Covariance Family
 
-Both functions accept `(x, y)` — one row per paired observation.
+`STATS_COVARIANCE(x, y)` accepts one row per paired observation and returns a JSON STRING with two fields:
 
-| Function | Returns | Description |
-|---|---|---|
-| `STATS_COVARIANCE_POP(x, y)` | `DOUBLE` | Population covariance σ_xy = Σ(xi−μx)(yi−μy) / N |
-| `STATS_COVARIANCE_SAMP(x, y)` | `DOUBLE` | Sample covariance s_xy = Σ(xi−x̄)(yi−ȳ) / (n−1) (Bessel-corrected) |
+| Field | Description |
+|---|---|
+| `pop` | Population covariance σ_xy = C/n; 0.0 for n=1 |
+| `samp` | Sample covariance s_xy = C/(n−1) (Bessel-corrected); null when n < 2 |
 
-Both functions:
-- Use Welford's single-pass streaming algorithm — O(1) memory, numerically stable
-- Skip rows where either `x` or `y` is NULL (concurrent-pair discard)
-- Return NULL when all pairs are NULL
-- Work with `GROUP BY`
-
-`STATS_COVARIANCE_POP` requires N ≥ 1 and returns 0.0 for a single pair. `STATS_COVARIANCE_SAMP` requires n ≥ 2 and returns NULL otherwise.
+`STATS_COVARIANCE`:
+- Uses Welford's single-pass streaming algorithm — O(1) memory, numerically stable
+- Skips rows where either `x` or `y` is NULL (concurrent-pair discard)
+- Returns NULL when all pairs are NULL
+- Works with `GROUP BY`
 
 Interpretation: positive covariance means x and y increase together; negative means they move in opposite directions; zero indicates no linear relationship.
+
+Use `CAST(STATS_COVARIANCE(...) AS CHAR)` to read results in the mysql CLI.
 
 ### Means Family *(beta)*
 
