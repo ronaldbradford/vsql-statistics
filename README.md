@@ -139,7 +139,7 @@ FROM a;
 
 ### IQR Family
 
-![Box plot showing quartiles and IQR fence bounds](images/iqr.png)
+<img src="images/iqr.png" alt="Box plot showing quartiles and IQR fence bounds" width="400">
 
 `STATS_IQR(col)` sorts the group once and returns a JSON STRING with all distribution summary fields:
 
@@ -162,7 +162,7 @@ Use `CAST(STATS_IQR(...) AS CHAR)` to read results in the mysql CLI.
 
 ### Two-Sample t-Test Family (equal variances / pooled variance)
 
-![One-sample t-test distribution with critical region](images/ttest.png)
+<img src="images/ttest.png" alt="One-sample t-test distribution with critical region" width="400">
 
 Both functions accept `(value, group)` where the group column identifies observations as belonging to group 1 or group 2. Other group values are silently ignored.
 
@@ -205,7 +205,7 @@ See `examples/t_test_height.sql` and `examples/t_test_us_draft.sql` for complete
 
 ### Mode Family
 
-![Distribution diagram comparing mean, median, and mode](images/mode.svg)
+<img src="images/mode.svg" alt="Distribution diagram comparing mean, median, and mode" width="400">
 
 | Function | Returns | Description |
 |---|---|---|
@@ -220,7 +220,7 @@ Use `CAST(col AS DOUBLE)` on INT columns — without it the JSON values will be 
 
 ### One-Sample Z-Test Family (known population mean and standard deviation)
 
-![Z-test null hypothesis rejection region](images/ztest.png)
+<img src="images/ztest.png" alt="Z-test null hypothesis rejection region" width="400">
 
 `STATS_ZTEST(value, mu, sigma)` takes the known population mean `mu` and standard deviation `sigma`, and returns a JSON STRING with three fields:
 
@@ -242,7 +242,7 @@ Use `CAST(STATS_ZTEST(...) AS CHAR)` to read results in the mysql CLI.
 
 ### Kurtosis Family
 
-![Overlaid probability density functions comparing kurtosis shapes](images/kurtosis.svg)
+<img src="images/kurtosis.svg" alt="Overlaid probability density functions comparing kurtosis shapes" width="400">
 
 | Function | Returns | Description |
 |---|---|---|
@@ -260,7 +260,7 @@ Interpretation: normal distribution has β₂ = 3 and g₂ = 0. Positive excess 
 
 ### Covariance Family
 
-![Scatter plots showing positive, negative, and zero covariance](images/covariance.svg)
+<img src="images/covariance.svg" alt="Scatter plots showing positive, negative, and zero covariance" width="400">
 
 `STATS_COVARIANCE(x, y)` accepts one row per paired observation and returns a JSON STRING with two fields:
 
@@ -281,7 +281,7 @@ Use `CAST(STATS_COVARIANCE(...) AS CHAR)` to read results in the mysql CLI.
 
 ### Means Family
 
-![Distribution diagram showing mean, median, and mode positions](images/means.svg)
+<img src="images/means.svg" alt="Distribution diagram showing mean, median, and mode positions" width="400">
 
 `STATS_MEAN(value, trim_pct)` computes all four robust/ratio means in one pass and returns a JSON STRING:
 
@@ -304,7 +304,7 @@ Use `CAST(STATS_MEAN(...) AS CHAR)` to read results in the mysql CLI.
 
 ### Chi-Squared Family
 
-![Chi-squared distribution cumulative density functions](images/chisq.png)
+<img src="images/chisq.png" alt="Chi-squared distribution cumulative density functions" width="400">
 
 Both functions share a common formula — χ² = Σ[(O − E)² / E] — and return a JSON STRING with fields `chi_sq`, `df`, and `p`. Use `CAST(... AS CHAR(200))` and `JSON_EXTRACT` to access individual fields.
 
@@ -335,7 +335,7 @@ See `examples/chisq_support_tickets.sql` for a complete worked example.
 
 ### One-Way ANOVA Family
 
-![ANOVA diagram showing group means fitted over data points](images/anova.svg)
+<img src="images/anova.svg" alt="ANOVA diagram showing group means fitted over data points" width="400">
 
 Tests whether three or more independent groups share the same population mean by partitioning total variance into between-group (treatment) and within-group (error) components.
 
@@ -367,7 +367,7 @@ Use `CAST(STATS_ANOVA(...) AS CHAR)` to read results in the mysql CLI.
 
 ### Skewness Family
 
-![Negative and positive skew diagrams](images/skewness.svg)
+<img src="images/skewness.svg" alt="Negative and positive skew diagrams" width="400">
 
 | Function | Returns | Description |
 |---|---|---|
