@@ -11,7 +11,7 @@ This file provides guidance to AI coding assistants when working with code in th
 - **IQR family (6 functions):** `STATS_IQR`, `STATS_Q1`, `STATS_Q3`, `STATS_MEDIAN`, `STATS_IQR_LOWER_FENCE`, `STATS_IQR_UPPER_FENCE`
 - **Two-sample t-test family (2 JSON functions):** `STATS_TTEST`, `STATS_TTEST_GROUPS`
 - **Mode family (3 functions):** `STATS_MODE`, `STATS_MODE_MIN`, `STATS_MODE_MAX`
-- **Skewness family (2 functions):** `STATS_SKEWNESS`, `STATS_SKEWNESS_PEARSON`
+- **Skewness family (1 JSON function):** `STATS_SKEWNESS`
 - **Z-test family (3 functions):** `STATS_ZTEST_Z`, `STATS_ZTEST_P_ONE_TAIL`, `STATS_ZTEST_P_TWO_TAIL`
 - **Chi-squared family (2 JSON functions):** `STATS_CHISQ_GOF`, `STATS_CHISQ_INDEP`
 - **Kurtosis family (2 functions):** `STATS_KURTOSIS`, `STATS_KURTOSIS_EXCESS`
@@ -49,7 +49,7 @@ The t-test family (2 JSON functions) uses `TTestState` with separate `group1`/`g
 
 The mode family (3 functions) uses `ModeState` with `std::unordered_map<double, size_t>` for frequency counting. `STATS_MODE` returns a JSON STRING; `STATS_MODE_MIN` and `STATS_MODE_MAX` return REAL. All three return NULL when no value appears more than once. NaN inputs are skipped alongside NULLs.
 
-The skewness family (2 functions) uses two separate states. `STATS_SKEWNESS` uses `SkewState` — a streaming accumulator of n, Σx, Σx², Σx³ (shifted by the first observed value to reduce floating-point cancellation); no vector storage, O(1) memory per group. `STATS_SKEWNESS_PEARSON` reuses `StatsState` (vector of doubles) for median access. Both return NULL when variance is zero or n < 2.
+The skewness family (1 JSON function) uses `StatsState` (vector of doubles). `STATS_SKEWNESS(col)` returns a JSON STRING `{"moment": ..., "pearson": ...}` where `moment` is the population skewness g₁ = m₃/m₂^(3/2) and `pearson` is 3×(mean−median)/σ. Both fields are `null` when variance is zero. The function returns NULL when n < 2. Use `CAST(... AS CHAR)` and `JSON_EXTRACT` to access individual fields.
 
 The z-test family (3 functions) uses `ZTestState` — streaming accumulator of n and Σx, plus stored `mu` and `sigma` constants (last non-null wins per row; sigma defaults to 0.0 so all-null sigma returns NULL). `STATS_ZTEST_P_ONE_TAIL` returns the upper-tail probability P(Z > z), which is > 0.5 when the sample mean is below μ. All three return NULL when n=0, sigma≤0, or sigma is NaN.
 
@@ -71,7 +71,7 @@ The covariance family (2 functions) uses `CovState` — a streaming accumulator 
 **Function registration:** `make_aggregate_func<StatsState, &result_fn>(name).returns(REAL).param(REAL).clear<&stats_clear>().accumulate<&stats_accumulate>().build()`
 
 **Key files:**
-- `src/vsql_statistics.cc` — all 33 aggregate functions (6 IQR + 2 t-test + 3 mode + 2 skewness + 3 z-test + 2 chi-squared + 2 kurtosis + 2 covariance + 4 means + 9 ANOVA)
+- `src/vsql_statistics.cc` — all 32 aggregate functions (6 IQR + 2 t-test + 3 mode + 1 skewness + 3 z-test + 2 chi-squared + 2 kurtosis + 2 covariance + 4 means + 9 ANOVA)
 - `manifest.json` — extension metadata
 - `CMakeLists.txt` — build configuration
 - `cmake/FindVillageSQL.cmake` — SDK discovery
@@ -107,8 +107,7 @@ SELECT STATS_IQR(CAST(col AS DOUBLE)) FROM t GROUP BY group_col;
 SELECT CAST(STATS_TTEST(value, grp, 0.05) AS CHAR) FROM t;
 SELECT CAST(STATS_TTEST_GROUPS(value, grp) AS CHAR) FROM t;
 SELECT STATS_MODE(CAST(col AS DOUBLE)) FROM t;
-SELECT STATS_SKEWNESS(col) FROM t;
-SELECT STATS_SKEWNESS_PEARSON(col) FROM t;
+SELECT CAST(STATS_SKEWNESS(col) AS CHAR) FROM t;
 SELECT STATS_ZTEST_Z(col, 500.0, 40.0) FROM t;
 SELECT STATS_ZTEST_P_TWO_TAIL(col, 500.0, 40.0) FROM t;
 SELECT CAST(STATS_CHISQ_GOF(observed, expected) AS CHAR) FROM t;

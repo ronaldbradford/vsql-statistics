@@ -478,62 +478,50 @@ static constexpr auto make_mode_str_func(const char *name) {
 // Skewness family
 // =============================================================================
 
-struct SkewState {
-  size_t n = 0;
-  double ref = 0.0;  // first observed value; centering reduces floating-point cancellation
-  double sum = 0.0;
-  double sum_sq = 0.0;
-  double sum_cu = 0.0;
-};
-
-static void skew_clear(SkewState &s) { s = SkewState{}; }
-
-static void skew_accumulate(SkewState &s, RealArg v) {
-  if (v.is_null() || std::isnan(v.value())) return;
-  if (s.n == 0) s.ref = v.value();
-  const double x = v.value() - s.ref;
-  const double x2 = x * x;
-  s.n++;
-  s.sum += x;
-  s.sum_sq += x2;
-  s.sum_cu += x2 * x;
-}
-
-// Population skewness: third standardized moment g₁ = m₃ / m₂^(3/2).
-// Uses the expanded-moment identities to avoid storing individual values.
-static void stats_skewness_result(const SkewState &s, RealResult out) try {
-  if (s.n < 2) { out.set_null(); return; }
-  const double mean = s.sum / static_cast<double>(s.n);
-  const double m2 = s.sum_sq / static_cast<double>(s.n) - mean * mean;
-  if (m2 <= 0.0) { out.set_null(); return; }
-  const double m3 = s.sum_cu / static_cast<double>(s.n)
-              - 3.0 * mean * s.sum_sq / static_cast<double>(s.n)
-              + 2.0 * mean * mean * mean;
-  out.set(m3 / std::pow(m2, 1.5));
-} catch (...) { out.error("STATS_SKEWNESS: unexpected error"); }
-
-// Pearson's median skewness: 3 × (mean − median) / population_stddev.
-// Requires value storage for median; reuses StatsState/stats_accumulate.
-static void stats_skewness_pearson_result(const StatsState &s, RealResult out) try {
+// JSON object with both skewness measures.
+// moment: population skewness g₁ = m₃/m₂^(3/2) (third standardized moment).
+// pearson: 3 × (mean − median) / population_stddev.
+// Both are null when variance is zero; the whole result is null when n < 2.
+static void stats_skewness_json_result(const StatsState &s, StringResult out) try {
   const size_t n = s.values.size();
   if (n < 2) { out.set_null(); return; }
-  const double mean = std::accumulate(s.values.begin(), s.values.end(), 0.0) / static_cast<double>(n);
-  double variance = 0.0;
-  for (const double v : s.values) variance += (v - mean) * (v - mean);
-  variance /= static_cast<double>(n);
-  const double stddev = std::sqrt(variance);
-  if (stddev == 0.0) { out.set_null(); return; }
-  std::sort(s.values.begin(), s.values.end());
-  out.set(3.0 * (mean - range_median(s.values, 0, n)) / stddev);
-} catch (...) { out.error("STATS_SKEWNESS_PEARSON: unexpected error"); }
 
-template<auto ResultFn>
-static constexpr auto make_moment_skew_func(const char *name) {
-  return vsql::make_aggregate_func<SkewState, ResultFn>(name)
-    .returns(vsql::REAL)
+  const double dn = static_cast<double>(n);
+  const double mean = std::accumulate(s.values.begin(), s.values.end(), 0.0) / dn;
+
+  double sum2 = 0.0, sum3 = 0.0;
+  for (const double v : s.values) {
+    const double d = v - mean;
+    sum2 += d * d;
+    sum3 += d * d * d;
+  }
+  const double m2 = sum2 / dn;
+
+  std::string json;
+  json.reserve(128);
+  json += '{';
+
+  if (m2 <= 0.0) {
+    json += "\"moment\":null,\"pearson\":null";
+  } else {
+    std::sort(s.values.begin(), s.values.end());
+    const double stddev = std::sqrt(m2);
+    json += "\"moment\":";
+    json += fmt_no_exp((sum3 / dn) / std::pow(m2, 1.5));
+    json += ",\"pearson\":";
+    json += fmt_no_exp(3.0 * (mean - range_median(s.values, 0, n)) / stddev);
+  }
+
+  json += '}';
+  out.set(json);
+} catch (...) { out.error("STATS_SKEWNESS: unexpected error"); }
+
+static constexpr auto make_skewness_json_func(const char *name) {
+  return vsql::make_aggregate_func<StatsState, &stats_skewness_json_result>(name)
+    .returns(vsql::STRING)
     .param(vsql::REAL)
-    .template clear<&skew_clear>()
-    .template accumulate<&skew_accumulate>()
+    .template clear<&stats_clear>()
+    .template accumulate<&stats_accumulate>()
     .build();
 }
 
@@ -1169,8 +1157,7 @@ VEF_GENERATE_ENTRY_POINTS(
     .func(make_mode_str_func<&stats_mode_result>("STATS_MODE"))
     .func(make_mode_real_func<&stats_mode_min_result>("STATS_MODE_MIN"))
     .func(make_mode_real_func<&stats_mode_max_result>("STATS_MODE_MAX"))
-    .func(make_moment_skew_func<&stats_skewness_result>("STATS_SKEWNESS"))
-    .func(make_stats_func<&stats_skewness_pearson_result>("STATS_SKEWNESS_PEARSON"))
+    .func(make_skewness_json_func("STATS_SKEWNESS"))
     .func(make_ztest_func<&stats_ztest_z_result>("STATS_ZTEST_Z"))
     .func(make_ztest_func<&stats_ztest_p_one_tail_result>("STATS_ZTEST_P_ONE_TAIL"))
     .func(make_ztest_func<&stats_ztest_p_two_tail_result>("STATS_ZTEST_P_TWO_TAIL"))

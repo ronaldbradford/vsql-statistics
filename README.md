@@ -9,14 +9,14 @@ Statistical aggregate functions for data scientists — IQR, quartiles, outlier 
 | **IQR** | 6 | `STATS_IQR`, `STATS_Q1`, `STATS_Q3`, `STATS_MEDIAN`, `STATS_IQR_LOWER_FENCE`, `STATS_IQR_UPPER_FENCE` |
 | **T-test** | 2 | `STATS_TTEST`, `STATS_TTEST_GROUPS` |
 | **Mode** | 3 | `STATS_MODE`, `STATS_MODE_MIN`, `STATS_MODE_MAX` |
-| **Skewness** | 2 | `STATS_SKEWNESS`, `STATS_SKEWNESS_PEARSON` |
+| **Skewness** | 1 | `STATS_SKEWNESS` |
 | **Z-test** | 3 | `STATS_ZTEST_Z`, `STATS_ZTEST_P_ONE_TAIL`, `STATS_ZTEST_P_TWO_TAIL` |
 | **Chi-squared** | 2 | `STATS_CHISQ_GOF`, `STATS_CHISQ_INDEP` |
 | **Kurtosis** | 2 | `STATS_KURTOSIS`, `STATS_KURTOSIS_EXCESS` |
 | **Covariance** | 2 | `STATS_COVARIANCE_POP`, `STATS_COVARIANCE_SAMP` |
 | **Means** | 4 | `STATS_MEAN_TRIMMED`, `STATS_MEAN_WINSORIZED`, `STATS_MEAN_GEOMETRIC`, `STATS_MEAN_HARMONIC` |
 | **ANOVA** | 9 | `STATS_ANOVA_F`, `STATS_ANOVA_P`, `STATS_ANOVA_SSB`, `STATS_ANOVA_SSW`, `STATS_ANOVA_SST`, `STATS_ANOVA_MSB`, `STATS_ANOVA_MSW`, `STATS_ANOVA_DFB`, `STATS_ANOVA_DFW` |
-| **Total** | **35** | |
+| **Total** | **34** | |
 
 > **Beta notice:** All functions in this extension (`STATS_IQR`, `STATS_TTEST`, `STATS_TTEST_GROUPS`, `STATS_MODE`, `STATS_SKEWNESS`, `STATS_ZTEST_*`, `STATS_CHISQ_*`, `STATS_KURTOSIS*`, `STATS_COVARIANCE_*`, `STATS_MEAN_*`, `STATS_ANOVA_*`) are beta quality. They are functionally correct on the tested datasets but have not been validated at production scale. Use with caution in high-volume or precision-critical workloads and report any anomalies.
 
@@ -70,11 +70,11 @@ SELECT
   STATS_MODE_MAX(CAST(score AS DOUBLE)) AS highest_mode
 FROM survey_responses;
 
--- Measure distribution asymmetry
-SELECT
-  STATS_SKEWNESS(salary)         AS skewness,
-  STATS_SKEWNESS_PEARSON(salary) AS skewness_pearson
-FROM employee_compensation;
+-- Measure distribution asymmetry (moment = third standardized moment, pearson = median-based)
+WITH s AS (SELECT CAST(STATS_SKEWNESS(salary) AS CHAR(200)) AS json FROM employee_compensation)
+SELECT JSON_EXTRACT(json, '$.moment') AS skewness_moment,
+       JSON_EXTRACT(json, '$.pearson') AS skewness_pearson
+FROM s;
 
 -- One-sample z-test: is this batch's mean consistent with the known population?
 SELECT
@@ -344,23 +344,23 @@ All ANOVA functions:
 - Return NULL when within-group variance is zero (MSW = 0)
 - Work with `GROUP BY`, computing an independent ANOVA per partition
 
-The spec requires k ≥ 3 groups for a valid one-way ANOVA. k = 2 is mathematically equivalent to a t-test — use `STATS_TTEST_T` for two-group comparisons.
+The spec requires k ≥ 3 groups for a valid one-way ANOVA. k = 2 is mathematically equivalent to a t-test — use `STATS_TTEST` for two-group comparisons.
 
 ### Skewness Family
 
 | Function | Returns | Description |
 |---|---|---|
-| `STATS_SKEWNESS(col)` | `DOUBLE` | Population skewness: third standardized moment g₁ = m₃ / m₂^(3/2) |
-| `STATS_SKEWNESS_PEARSON(col)` | `DOUBLE` | Pearson's median skewness: 3 × (mean − median) / σ |
+| `STATS_SKEWNESS(col)` | `STRING` | JSON `{"moment": ..., "pearson": ...}` — both fields `null` when variance is zero |
 
-Both skewness functions:
-- Skip NULL values; return NULL for an all-NULL group
-- Return NULL for a single-row group or when all values are equal (zero variance)
-- Work with `GROUP BY`
+`moment` is the population skewness (third standardized moment g₁ = m₃ / m₂^(3/2)). `pearson` is Pearson's median skewness: 3 × (mean − median) / σ.
 
-`STATS_SKEWNESS` uses a streaming accumulator (no value storage) — memory cost is O(1) per group regardless of group size. `STATS_SKEWNESS_PEARSON` requires storing all values to compute the median — memory cost is O(n) per group.
+`STATS_SKEWNESS`:
+- Skips NULL values; returns NULL for an all-NULL group or a single-row group
+- Returns `{"moment":null,"pearson":null}` when all values are equal (zero variance)
+- Works with `GROUP BY`
+- Stores all values per group (O(n) memory) to compute the median for Pearson's measure
 
-Positive values indicate right-skewed distributions (long right tail); negative values indicate left-skewed (long left tail); zero indicates symmetry.
+Positive `moment` indicates right-skewed (long right tail); negative indicates left-skewed; zero indicates symmetry.
 
 ## Building
 
