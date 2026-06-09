@@ -88,6 +88,11 @@ SELECT JSON_EXTRACT(json, '$.kurtosis') AS pop_kurtosis,
        JSON_EXTRACT(json, '$.excess')   AS excess_kurtosis
 FROM k;
 
+-- Covariance: do advertising spend and revenue move together?
+SELECT STATS_COVARIANCE_POP(ad_spend, revenue)  AS cov_pop,
+       STATS_COVARIANCE_SAMP(ad_spend, revenue) AS cov_samp
+FROM monthly_results;
+
 -- Trimmed mean: reduce outlier influence by discarding extremes
 SELECT STATS_MEAN_TRIMMED(sale_amount, 0.1) AS robust_mean FROM daily_sales;
 
