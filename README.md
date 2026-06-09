@@ -6,16 +6,16 @@ Statistical aggregate functions for data scientists — IQR, quartiles, outlier 
 
 | Family | Functions |
 |--------|-----------|
-| **IQR** | `STATS_IQR` |
-| **T-test** | `STATS_TTEST`, `STATS_TTEST_GROUPS` |
-| **Mode** | `STATS_MODE` |
-| **Skewness** | `STATS_SKEWNESS` |
-| **Z-test** | `STATS_ZTEST` |
-| **Chi-squared** | `STATS_CHISQ_GOF`, `STATS_CHISQ_INDEP` |
-| **Kurtosis** | `STATS_KURTOSIS` |
-| **Covariance** | `STATS_COVARIANCE` |
-| **Means** | `STATS_MEAN` |
-| **ANOVA** | `STATS_ANOVA` |
+| [**IQR**](https://en.wikipedia.org/wiki/Interquartile_range) | `STATS_IQR` |
+| [**T-test**](https://en.wikipedia.org/wiki/Student%27s_t-test) | `STATS_TTEST`, `STATS_TTEST_GROUPS` |
+| [**Mode**](https://en.wikipedia.org/wiki/Mode_(statistics)) | `STATS_MODE` |
+| [**Skewness**](https://en.wikipedia.org/wiki/Skewness) | `STATS_SKEWNESS` |
+| [**Z-test**](https://en.wikipedia.org/wiki/Z-test) | `STATS_ZTEST` |
+| [**Chi-squared**](https://en.wikipedia.org/wiki/Chi-squared_test) | `STATS_CHISQ_GOF`, `STATS_CHISQ_INDEP` |
+| [**Kurtosis**](https://en.wikipedia.org/wiki/Kurtosis) | `STATS_KURTOSIS` |
+| [**Covariance**](https://en.wikipedia.org/wiki/Covariance) | `STATS_COVARIANCE` |
+| [**Means**](https://en.wikipedia.org/wiki/Truncated_mean) | `STATS_MEAN` |
+| [**ANOVA**](https://en.wikipedia.org/wiki/One-way_analysis_of_variance) | `STATS_ANOVA` |
 
 > **Beta notice:** Functions in this extension (`STATS_IQR`, `STATS_TTEST`, `STATS_TTEST_GROUPS`, `STATS_MODE`, `STATS_SKEWNESS`, `STATS_ZTEST`, `STATS_CHISQ_*`, `STATS_KURTOSIS`, `STATS_COVARIANCE`, `STATS_MEAN`, `STATS_ANOVA`) are beta quality. They are functionally correct on the tested datasets but have not been validated at production scale. Use with caution in high-volume or precision-critical workloads and report any anomalies.
 
