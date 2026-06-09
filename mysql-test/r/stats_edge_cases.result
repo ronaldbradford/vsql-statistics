@@ -3,9 +3,11 @@ CREATE DATABASE IF NOT EXISTS vsql_test;
 USE vsql_test;
 CREATE TABLE t_trim (val DOUBLE);
 INSERT INTO t_trim VALUES (10.0), (20.0), (30.0), (40.0);
-SELECT STATS_MEAN_TRIMMED(val, 0.5) AS trim_50, STATS_MEAN_WINSORIZED(val, 0.6) AS wins_60 FROM t_trim;
+SELECT JSON_EXTRACT(CAST(STATS_MEAN(val, 0.5) AS CHAR), '$.trimmed') AS trim_50,
+JSON_EXTRACT(CAST(STATS_MEAN(val, 0.6) AS CHAR), '$.winsorized') AS wins_60
+FROM t_trim;
 trim_50	wins_60
-NULL	NULL
+null	null
 DROP TABLE t_trim;
 CREATE TABLE t_ttest (val DOUBLE, grp INT);
 INSERT INTO t_ttest VALUES (10.0, 1), (12.0, 1), (50.0, 2), (52.0, 2);

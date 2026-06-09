@@ -1,93 +1,60 @@
-# vsql_statistics: trimmed mean, Winsorized mean, geometric mean, harmonic mean
+--echo # vsql_statistics: trimmed, Winsorized, geometric, and harmonic means
+
 INSTALL EXTENSION vsql_statistics;
 CREATE DATABASE IF NOT EXISTS vsql_test;
 USE vsql_test;
 
-# --- Trimmed mean: spec example {2,10,12,14,15,18,100} at 20% trim ---
-# Removes 1 value from each end (floor(0.2*7)=1); mean of {10,12,14,15,18} = 13.8
+--echo # --- Spec example {2,10,12,14,15,18,100} at 20% trim ---
+--echo # trimmed: removes 1 from each end → mean({10,12,14,15,18})=13.8
+--echo # winsorized: 2→10, 100→18; sum=97, mean=97/7≈13.857
+--echo # geometric: ⁷√(2×10×12×14×15×18×100)
+--echo # harmonic: 7/(1/2+1/10+1/12+1/14+1/15+1/18+1/100)
 CREATE TABLE means_data (val DOUBLE, trim_pct DOUBLE);
 INSERT INTO means_data VALUES (2,0.2),(10,0.2),(12,0.2),(14,0.2),(15,0.2),(18,0.2),(100,0.2);
-SELECT STATS_MEAN_TRIMMED(val, trim_pct) AS trimmed FROM means_data;
-
-# --- Winsorized mean: spec example {2,10,12,14,15,18,100} at 20% ---
-# Replaces 2 with 10 and 100 with 18; sum=97, mean=97/7≈13.86
-SELECT ROUND(STATS_MEAN_WINSORIZED(val, trim_pct), 2) AS winsorized FROM means_data;
-
-# --- trim=0 returns the arithmetic mean ---
+SELECT CAST(STATS_MEAN(val, trim_pct) AS CHAR) AS means FROM means_data;
 DELETE FROM means_data;
+
+--echo # --- trim=0: trimmed/winsorized equal arithmetic mean ---
 INSERT INTO means_data VALUES (2,0),(10,0),(12,0),(14,0),(15,0),(18,0),(100,0);
-SELECT ROUND(STATS_MEAN_TRIMMED(val, trim_pct), 4)    AS trimmed_0  FROM means_data;
-SELECT ROUND(STATS_MEAN_WINSORIZED(val, trim_pct), 4) AS winsorized_0 FROM means_data;
-
-# --- All-NULL: both functions return NULL ---
+SELECT CAST(STATS_MEAN(val, trim_pct) AS CHAR) AS means FROM means_data;
 DELETE FROM means_data;
-INSERT INTO means_data VALUES (NULL,0.2),(NULL,0.2);
-SELECT STATS_MEAN_TRIMMED(val, trim_pct)    AS trimmed_null   FROM means_data;
-SELECT STATS_MEAN_WINSORIZED(val, trim_pct) AS winsorized_null FROM means_data;
 
-# --- Degenerate trim (all values removed/replaced): returns NULL ---
-# trim_pct=0.5, n=2: k=floor(0.5*2)=1, 2k=2>=n=2 → NULL
+--echo # --- NULL trim_pct: trimmed and winsorized are null ---
+INSERT INTO means_data VALUES (1.05,NULL),(1.10,NULL),(1.20,NULL);
+SELECT CAST(STATS_MEAN(val, trim_pct) AS CHAR) AS means FROM means_data;
 DELETE FROM means_data;
+
+--echo # --- Degenerate trim (all values removed): trimmed/winsorized null ---
+--echo # trim_pct=0.5, n=2: k=floor(0.5*2)=1, 2k=2>=n=2
 INSERT INTO means_data VALUES (10,0.5),(20,0.5);
-SELECT STATS_MEAN_TRIMMED(val, trim_pct)    AS trimmed_degen   FROM means_data;
-SELECT STATS_MEAN_WINSORIZED(val, trim_pct) AS winsorized_degen FROM means_data;
+SELECT CAST(STATS_MEAN(val, trim_pct) AS CHAR) AS means FROM means_data;
+DELETE FROM means_data;
+
+--echo # --- All-NULL values: whole result is NULL ---
+INSERT INTO means_data VALUES (NULL,0.2),(NULL,0.2);
+SELECT CAST(STATS_MEAN(val, trim_pct) AS CHAR) AS means FROM means_data;
+DELETE FROM means_data;
+
+--echo # --- Non-positive values: skipped for geometric/harmonic ---
+INSERT INTO means_data VALUES (-1,0.2),(0,0.2),(10,0.2),(20,0.2),(30,0.2);
+SELECT CAST(STATS_MEAN(val, trim_pct) AS CHAR) AS means FROM means_data;
+DELETE FROM means_data;
+
+--echo # --- All non-positive: geometric/harmonic are null ---
+INSERT INTO means_data VALUES (-5,NULL),(-3,NULL),(0,NULL);
+SELECT CAST(STATS_MEAN(val, trim_pct) AS CHAR) AS means FROM means_data;
+DELETE FROM means_data;
 
 DROP TABLE means_data;
 
-# --- Geometric mean: spec example investment growth {1.05, 1.10, 1.20} ---
-# ³√(1.05×1.10×1.20) = ³√1.386 ≈ 1.1149
-CREATE TABLE geo_data (val DOUBLE);
-INSERT INTO geo_data VALUES (1.05),(1.10),(1.20);
-SELECT ROUND(STATS_MEAN_GEOMETRIC(val), 4) AS geo_mean FROM geo_data;
-
-# --- Geometric mean: non-positive values are skipped ---
-DELETE FROM geo_data;
-INSERT INTO geo_data VALUES (-1),(0),(1.05),(1.10),(1.20);
-SELECT ROUND(STATS_MEAN_GEOMETRIC(val), 4) AS geo_skip_nonpos FROM geo_data;
-
-# --- Geometric mean: all-NULL or all non-positive returns NULL ---
-DELETE FROM geo_data;
-INSERT INTO geo_data VALUES (NULL),(NULL);
-SELECT STATS_MEAN_GEOMETRIC(val) AS geo_null FROM geo_data;
-
-DELETE FROM geo_data;
-INSERT INTO geo_data VALUES (-5),(-3),(0);
-SELECT STATS_MEAN_GEOMETRIC(val) AS geo_nonpos FROM geo_data;
-
-DROP TABLE geo_data;
-
-# --- Harmonic mean: spec example average speed {40, 60} ---
-# 2 / (1/40 + 1/60) = 48.0
-CREATE TABLE harm_data (val DOUBLE);
-INSERT INTO harm_data VALUES (40),(60);
-SELECT ROUND(STATS_MEAN_HARMONIC(val), 1) AS harm_mean FROM harm_data;
-
-# --- Harmonic mean: non-positive values are skipped ---
-DELETE FROM harm_data;
-INSERT INTO harm_data VALUES (-1),(0),(40),(60);
-SELECT ROUND(STATS_MEAN_HARMONIC(val), 1) AS harm_skip_nonpos FROM harm_data;
-
-# --- Harmonic mean: all-NULL or all non-positive returns NULL ---
-DELETE FROM harm_data;
-INSERT INTO harm_data VALUES (NULL),(NULL);
-SELECT STATS_MEAN_HARMONIC(val) AS harm_null FROM harm_data;
-
-DELETE FROM harm_data;
-INSERT INTO harm_data VALUES (-5),(-3);
-SELECT STATS_MEAN_HARMONIC(val) AS harm_nonpos FROM harm_data;
-
-DROP TABLE harm_data;
-
-# --- GROUP BY: all four functions computed independently per group ---
+--echo # --- GROUP BY: means computed independently per group ---
 CREATE TABLE vsql_test.means_grouped (grp INT, val DOUBLE, trim_pct DOUBLE);
 INSERT INTO means_grouped VALUES
   (1, 2,   0.2),(1, 10,  0.2),(1, 12,  0.2),(1, 14,  0.2),
   (1, 15,  0.2),(1, 18,  0.2),(1, 100, 0.2),
-  (2, 1.05,0.0),(2, 1.10,0.0),(2, 1.20,0.0);
+  (2, 1.05,NULL),(2, 1.10,NULL),(2, 1.20,NULL);
 SELECT grp,
-  STATS_MEAN_TRIMMED(val, trim_pct)              AS trimmed,
-  ROUND(STATS_MEAN_GEOMETRIC(val), 4)            AS geo_mean,
-  ROUND(STATS_MEAN_HARMONIC(val), 4)             AS harm_mean
+       CAST(STATS_MEAN(val, trim_pct) AS CHAR) AS means
 FROM vsql_test.means_grouped
 GROUP BY grp
 ORDER BY grp;

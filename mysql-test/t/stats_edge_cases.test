@@ -3,10 +3,12 @@ INSTALL EXTENSION vsql_statistics;
 CREATE DATABASE IF NOT EXISTS vsql_test;
 USE vsql_test;
 
-# 1. Trim percentage boundary checks (p >= 0.5 returns NULL)
+# 1. Trim percentage boundary checks (p >= 0.5 makes trimmed/winsorized null)
 CREATE TABLE t_trim (val DOUBLE);
 INSERT INTO t_trim VALUES (10.0), (20.0), (30.0), (40.0);
-SELECT STATS_MEAN_TRIMMED(val, 0.5) AS trim_50, STATS_MEAN_WINSORIZED(val, 0.6) AS wins_60 FROM t_trim;
+SELECT JSON_EXTRACT(CAST(STATS_MEAN(val, 0.5) AS CHAR), '$.trimmed') AS trim_50,
+       JSON_EXTRACT(CAST(STATS_MEAN(val, 0.6) AS CHAR), '$.winsorized') AS wins_60
+FROM t_trim;
 DROP TABLE t_trim;
 
 # 2. Dynamic critical value bisection limits for tiny alpha

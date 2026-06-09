@@ -14,11 +14,11 @@ Statistical aggregate functions for data scientists — IQR, quartiles, outlier 
 | **Chi-squared** | 2 | `STATS_CHISQ_GOF`, `STATS_CHISQ_INDEP` |
 | **Kurtosis** | 1 | `STATS_KURTOSIS` |
 | **Covariance** | 1 | `STATS_COVARIANCE` |
-| **Means** | 4 | `STATS_MEAN_TRIMMED`, `STATS_MEAN_WINSORIZED`, `STATS_MEAN_GEOMETRIC`, `STATS_MEAN_HARMONIC` |
+| **Means** | 1 | `STATS_MEAN` |
 | **ANOVA** | 1 | `STATS_ANOVA` |
-| **Total** | **20** | |
+| **Total** | **17** | |
 
-> **Beta notice:** All functions in this extension (`STATS_IQR`, `STATS_TTEST`, `STATS_TTEST_GROUPS`, `STATS_MODE`, `STATS_SKEWNESS`, `STATS_ZTEST`, `STATS_CHISQ_*`, `STATS_KURTOSIS`, `STATS_COVARIANCE`, `STATS_MEAN_*`, `STATS_ANOVA`) are beta quality. They are functionally correct on the tested datasets but have not been validated at production scale. Use with caution in high-volume or precision-critical workloads and report any anomalies.
+> **Beta notice:** All functions in this extension (`STATS_IQR`, `STATS_TTEST`, `STATS_TTEST_GROUPS`, `STATS_MODE`, `STATS_SKEWNESS`, `STATS_ZTEST`, `STATS_CHISQ_*`, `STATS_KURTOSIS`, `STATS_COVARIANCE`, `STATS_MEAN`, `STATS_ANOVA`) are beta quality. They are functionally correct on the tested datasets but have not been validated at production scale. Use with caution in high-volume or precision-critical workloads and report any anomalies.
 
 
 ## Installing
@@ -94,14 +94,14 @@ SELECT JSON_EXTRACT(json, '$.pop')  AS cov_pop,
        JSON_EXTRACT(json, '$.samp') AS cov_samp
 FROM c;
 
--- Trimmed mean: reduce outlier influence by discarding extremes
-SELECT STATS_MEAN_TRIMMED(sale_amount, 0.1) AS robust_mean FROM daily_sales;
-
--- Geometric mean: average growth rate across periods
-SELECT STATS_MEAN_GEOMETRIC(growth_factor) AS avg_growth FROM quarterly_returns;
-
--- Harmonic mean: true average for rates and ratios
-SELECT STATS_MEAN_HARMONIC(speed_mph) AS avg_speed FROM journey_legs;
+-- Robust means: trimmed/winsorized reduce outlier influence; geometric/harmonic for rates
+-- Pass NULL for trim_pct when only geometric/harmonic are needed
+WITH m AS (SELECT CAST(STATS_MEAN(sale_amount, 0.1) AS CHAR(300)) AS json FROM daily_sales)
+SELECT JSON_EXTRACT(json, '$.trimmed')    AS trimmed_mean,
+       JSON_EXTRACT(json, '$.winsorized') AS winsorized_mean,
+       JSON_EXTRACT(json, '$.geometric')  AS geo_mean,
+       JSON_EXTRACT(json, '$.harmonic')   AS harm_mean
+FROM m;
 
 -- Chi-squared goodness of fit: do observed counts match expected proportions?
 -- STATS_CHISQ_GOF returns JSON {chi_sq, df, p}; use CAST + JSON_EXTRACT to read fields.
@@ -268,30 +268,24 @@ Use `CAST(STATS_COVARIANCE(...) AS CHAR)` to read results in the mysql CLI.
 
 > These functions are beta quality — see the notice at the top of this document.
 
-#### Trimmed and Winsorized Means
+`STATS_MEAN(value, trim_pct)` computes all four robust/ratio means in one pass and returns a JSON STRING:
 
-Both functions accept `(col, trim_pct)` where `trim_pct` is the fraction to remove or replace from each end (e.g., `0.2` for 20%). Pass the same constant on every row.
+| Field | Description |
+|---|---|
+| `trimmed` | Arithmetic mean after removing the bottom and top `trim_pct` fraction |
+| `winsorized` | Arithmetic mean after replacing extremes with the boundary values |
+| `geometric` | nth root of the product of all positive values; use for growth rates |
+| `harmonic` | n / Σ(1/xᵢ); use for rates such as speed or throughput |
 
-| Function | Returns | Description |
-|---|---|---|
-| `STATS_MEAN_TRIMMED(col, trim_pct)` | `DOUBLE` | Arithmetic mean after removing the bottom and top `trim_pct` fraction |
-| `STATS_MEAN_WINSORIZED(col, trim_pct)` | `DOUBLE` | Arithmetic mean after replacing extremes with the boundary values |
+`STATS_MEAN`:
+- `trimmed` and `winsorized` are null when `trim_pct` was never set (pass NULL), is invalid (< 0 or ≥ 0.5), or trims away all values
+- `geometric` and `harmonic` are null when no positive values exist (non-positives are silently skipped)
+- Returns NULL when no values were accumulated (all-NULL input)
+- Works with `GROUP BY`
 
-Both functions:
-- Return NULL for an all-NULL group or when trimming removes all values (trim_pct ≥ 0.5)
-- Work with `GROUP BY`
+Pass `NULL` for `trim_pct` when only `geometric` and `harmonic` are needed.
 
-#### Geometric and Harmonic Means
-
-| Function | Returns | Description |
-|---|---|---|
-| `STATS_MEAN_GEOMETRIC(col)` | `DOUBLE` | nth root of the product of all values; use for growth rates and ratios |
-| `STATS_MEAN_HARMONIC(col)` | `DOUBLE` | n / Σ(1/xᵢ); use for rates such as speed or throughput |
-
-Both functions:
-- Skip non-positive values (log and reciprocal are undefined at zero or below)
-- Return NULL when no positive values exist in the group
-- Work with `GROUP BY`
+Use `CAST(STATS_MEAN(...) AS CHAR)` to read results in the mysql CLI.
 
 ### Chi-Squared Family
 

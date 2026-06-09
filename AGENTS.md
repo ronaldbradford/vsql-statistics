@@ -16,7 +16,7 @@ This file provides guidance to AI coding assistants when working with code in th
 - **Chi-squared family (2 JSON functions):** `STATS_CHISQ_GOF`, `STATS_CHISQ_INDEP`
 - **Kurtosis family (1 JSON function):** `STATS_KURTOSIS`
 - **Covariance family (1 JSON function):** `STATS_COVARIANCE`
-- **Means family — beta (4 functions):** `STATS_MEAN_TRIMMED`, `STATS_MEAN_WINSORIZED`, `STATS_MEAN_GEOMETRIC`, `STATS_MEAN_HARMONIC`
+- **Means family — beta (1 JSON function):** `STATS_MEAN`
 - **ANOVA family (1 JSON function):** `STATS_ANOVA`
 
 All functions operate on `DOUBLE` columns and are usable with `GROUP BY`, mirroring statistical primitives found in Python (numpy/scipy) and R.
@@ -58,7 +58,7 @@ The covariance family (1 JSON function) uses `CovState` — a streaming accumula
 
 The kurtosis family (1 JSON function) uses `KurtState` — a streaming accumulator of n, Σ(xi−ref), Σ(xi−ref)², Σ(xi−ref)³, Σ(xi−ref)⁴ (shifted by the first observed value for numerical stability). `STATS_KURTOSIS(col)` returns a JSON STRING `{"kurtosis": ..., "excess": ...}` where `kurtosis` is β₂ (n ≥ 2) and `excess` is the Fisher-Pearson unbiased g₂ (n ≥ 4; null when n < 4). Both fields are null for zero variance. The function returns NULL when n < 2. A normal distribution has β₂ = 3 and g₂ = 0.
 
-The means family (4 functions — beta) uses three states. `MeanTrimState` (vector + trim_pct) serves both `STATS_MEAN_TRIMMED` and `STATS_MEAN_WINSORIZED` (2-param functions). `MeanGeoState` (n, sum_log) is a streaming accumulator for `STATS_MEAN_GEOMETRIC`: accumulates Σln(xi) for positive values, then returns exp(sum_log/n). `MeanHarmState` (n, sum_recip) is a streaming accumulator for `STATS_MEAN_HARMONIC`: accumulates Σ(1/xi) for positive values, then returns n/sum_recip. Non-positive inputs are silently skipped for both geometric and harmonic.
+The means family (1 JSON function — beta) uses a single `MeanState` combining a vector (for sorting) and streaming accumulators (n_pos, sum_log, sum_recip) for positive values. `STATS_MEAN(value, trim_pct)` returns a JSON STRING `{"trimmed":..., "winsorized":..., "geometric":..., "harmonic":...}`. `trimmed` and `winsorized` are null when trim_pct is null/never set, invalid (< 0 or ≥ 0.5), or trims away all values. `geometric` and `harmonic` are null when no positive values exist. The whole result is NULL when no values were accumulated. Pass NULL for trim_pct when only geometric/harmonic are needed. Use `CAST(... AS CHAR)` to read results in the mysql CLI.
 
 The chi-squared family (2 JSON functions) uses two states. `ChiSqGofState` (chi_sq, k) serves `STATS_CHISQ_GOF(observed, expected)`, which returns a JSON STRING `{chi_sq, df, p}` where df = k−1 and p is null when df = 0. `ChiSqIndepState` (chi_sq, k, n_rows, n_cols) serves `STATS_CHISQ_INDEP(observed, expected, n_rows, n_cols)`, which returns `{chi_sq, df, p}` where df = (n_rows−1)(n_cols−1); df and p are null when dimensions are missing or df ≤ 0. The p-value is the regularized upper incomplete gamma Q(df/2, χ²/2); computed via series expansion (x < a+1) or Lentz's continued fraction (x ≥ a+1). Rows where expected ≤ 0 are skipped. Both functions return NULL when no valid (O, E) pairs exist. Use `CAST(... AS CHAR)` to read results in the mysql CLI.
 
@@ -74,7 +74,7 @@ The ANOVA family (1 JSON function) uses `AnovaState` — an `unordered_map<doubl
 **Function registration:** `make_aggregate_func<StatsState, &result_fn>(name).returns(REAL).param(REAL).clear<&stats_clear>().accumulate<&stats_accumulate>().build()`
 
 **Key files:**
-- `src/vsql_statistics.cc` — all 20 aggregate functions (6 IQR + 2 t-test + 1 mode + 1 skewness + 1 z-test + 2 chi-squared + 1 kurtosis + 1 covariance + 4 means + 1 ANOVA)
+- `src/vsql_statistics.cc` — all 17 aggregate functions (6 IQR + 2 t-test + 1 mode + 1 skewness + 1 z-test + 2 chi-squared + 1 kurtosis + 1 covariance + 1 means + 1 ANOVA)
 - `manifest.json` — extension metadata
 - `CMakeLists.txt` — build configuration
 - `cmake/FindVillageSQL.cmake` — SDK discovery

@@ -859,115 +859,79 @@ static constexpr auto make_cov_json_func(const char *name) {
 // Means family (trimmed, Winsorized, geometric, harmonic)
 // =============================================================================
 
-struct MeanTrimState {
+// trim_pct = NaN sentinel means "never set" → trimmed/winsorized fields are null.
+struct MeanState {
   mutable std::vector<double> values;
-  double trim_pct = 0.0; // fraction to trim/winsorize from each end (last non-null wins)
+  double trim_pct = std::numeric_limits<double>::quiet_NaN();
+  size_t n_pos = 0;
+  double sum_log = 0.0;   // Σ ln(xi) for positive values
+  double sum_recip = 0.0; // Σ(1/xi) for positive values
 };
 
-static void mean_trim_clear(MeanTrimState &s) { s = MeanTrimState{}; }
+static void mean_clear(MeanState &s) { s = MeanState{}; }
 
-static void mean_trim_accumulate(MeanTrimState &s, RealArg v, RealArg trim_pct) {
+static void mean_accumulate(MeanState &s, RealArg v, RealArg trim_pct) {
   if (!trim_pct.is_null() && !std::isnan(trim_pct.value())) s.trim_pct = trim_pct.value();
-  if (!v.is_null() && !std::isnan(v.value())) s.values.push_back(v.value());
-}
-
-static void stats_mean_trimmed_result(const MeanTrimState &s, RealResult out) try {
-  if (s.values.empty()) { out.set_null(); return; }
-  const double p = s.trim_pct;
-  if (std::isnan(p) || p < 0.0 || p >= 0.5) { out.set_null(); return; }
-  std::sort(s.values.begin(), s.values.end());
-  const size_t n = s.values.size();
-  const size_t k = static_cast<size_t>(std::floor(p * static_cast<double>(n)));
-  if (2 * k >= n) { out.set_null(); return; }
-  double sum = 0.0;
-  for (size_t i = k; i < n - k; ++i) sum += s.values[i];
-  out.set(sum / static_cast<double>(n - 2 * k));
-} catch (...) { out.error("STATS_MEAN_TRIMMED: unexpected error"); }
-
-static void stats_mean_winsorized_result(const MeanTrimState &s, RealResult out) try {
-  if (s.values.empty()) { out.set_null(); return; }
-  const double p = s.trim_pct;
-  if (std::isnan(p) || p < 0.0 || p >= 0.5) { out.set_null(); return; }
-  std::sort(s.values.begin(), s.values.end());
-  const size_t n = s.values.size();
-  const size_t k = static_cast<size_t>(std::floor(p * static_cast<double>(n)));
-  if (2 * k >= n) { out.set_null(); return; }
-  const double lo = s.values[k];
-  const double hi = s.values[n - 1 - k];
-  double sum = static_cast<double>(k) * lo;
-  for (size_t i = k; i < n - k; ++i) sum += s.values[i];
-  sum += static_cast<double>(k) * hi;
-  out.set(sum / static_cast<double>(n));
-} catch (...) { out.error("STATS_MEAN_WINSORIZED: unexpected error"); }
-
-template<auto ResultFn>
-static constexpr auto make_mean_trim_func(const char *name) {
-  return vsql::make_aggregate_func<MeanTrimState, ResultFn>(name)
-    .returns(vsql::REAL)
-    .param(vsql::REAL)
-    .param(vsql::REAL)
-    .template clear<&mean_trim_clear>()
-    .template accumulate<&mean_trim_accumulate>()
-    .build();
-}
-
-struct MeanGeoState {
-  size_t n = 0;
-  double sum_log = 0.0; // Σ ln(xi) for positive values only
-};
-
-static void mean_geo_clear(MeanGeoState &s) { s = MeanGeoState{}; }
-
-static void mean_geo_accumulate(MeanGeoState &s, RealArg v) {
   if (v.is_null() || std::isnan(v.value())) return;
   const double x = v.value();
-  if (!(x > 0.0)) return;
-  s.n++;
-  s.sum_log += std::log(x);
+  s.values.push_back(x);
+  if (x > 0.0) {
+    s.n_pos++;
+    s.sum_log += std::log(x);
+    s.sum_recip += 1.0 / x;
+  }
 }
 
-static void stats_mean_geometric_result(const MeanGeoState &s, RealResult out) try {
-  if (s.n == 0) { out.set_null(); return; }
-  out.set(std::exp(s.sum_log / static_cast<double>(s.n)));
-} catch (...) { out.error("STATS_MEAN_GEOMETRIC: unexpected error"); }
+// trimmed/winsorized are null when trim_pct was never set, invalid, or all values removed.
+// geometric/harmonic are null when no positive values exist.
+// Whole result is NULL when no values were accumulated.
+static void stats_mean_json_result(const MeanState &s, StringResult out) try {
+  if (s.values.empty()) { out.set_null(); return; }
 
-template<auto ResultFn>
-static constexpr auto make_mean_geo_func(const char *name) {
-  return vsql::make_aggregate_func<MeanGeoState, ResultFn>(name)
-    .returns(vsql::REAL)
+  const size_t n = s.values.size();
+  const double p = s.trim_pct;
+  std::string trimmed_str = "null";
+  std::string winsorized_str = "null";
+
+  if (!std::isnan(p) && p >= 0.0 && p < 0.5) {
+    std::sort(s.values.begin(), s.values.end());
+    const size_t k = static_cast<size_t>(std::floor(p * static_cast<double>(n)));
+    if (2 * k < n) {
+      double tsum = 0.0;
+      for (size_t i = k; i < n - k; ++i) tsum += s.values[i];
+      trimmed_str = fmt_no_exp(tsum / static_cast<double>(n - 2 * k));
+
+      const double lo = s.values[k];
+      const double hi = s.values[n - 1 - k];
+      double wsum = static_cast<double>(k) * lo;
+      for (size_t i = k; i < n - k; ++i) wsum += s.values[i];
+      wsum += static_cast<double>(k) * hi;
+      winsorized_str = fmt_no_exp(wsum / static_cast<double>(n));
+    }
+  }
+
+  const std::string geo_str  = (s.n_pos > 0)
+    ? fmt_no_exp(std::exp(s.sum_log / static_cast<double>(s.n_pos))) : "null";
+  const std::string harm_str = (s.n_pos > 0)
+    ? fmt_no_exp(static_cast<double>(s.n_pos) / s.sum_recip) : "null";
+
+  std::string json;
+  json.reserve(160);
+  json += "{\"trimmed\":";    json += trimmed_str;
+  json += ",\"winsorized\":"; json += winsorized_str;
+  json += ",\"geometric\":";  json += geo_str;
+  json += ",\"harmonic\":";   json += harm_str;
+  json += '}';
+  out.set(json);
+} catch (...) { out.error("STATS_MEAN: unexpected error"); }
+
+static constexpr auto make_mean_json_func(const char *name) {
+  return vsql::make_aggregate_func<MeanState, &stats_mean_json_result>(name)
+    .returns(vsql::STRING)
     .param(vsql::REAL)
-    .template clear<&mean_geo_clear>()
-    .template accumulate<&mean_geo_accumulate>()
-    .build();
-}
-
-struct MeanHarmState {
-  size_t n = 0;
-  double sum_recip = 0.0; // Σ(1/xi) for positive values only
-};
-
-static void mean_harm_clear(MeanHarmState &s) { s = MeanHarmState{}; }
-
-static void mean_harm_accumulate(MeanHarmState &s, RealArg v) {
-  if (v.is_null() || std::isnan(v.value())) return;
-  const double x = v.value();
-  if (!(x > 0.0)) return;
-  s.n++;
-  s.sum_recip += 1.0 / x;
-}
-
-static void stats_mean_harmonic_result(const MeanHarmState &s, RealResult out) try {
-  if (s.n == 0) { out.set_null(); return; }
-  out.set(static_cast<double>(s.n) / s.sum_recip);
-} catch (...) { out.error("STATS_MEAN_HARMONIC: unexpected error"); }
-
-template<auto ResultFn>
-static constexpr auto make_mean_harm_func(const char *name) {
-  return vsql::make_aggregate_func<MeanHarmState, ResultFn>(name)
-    .returns(vsql::REAL)
     .param(vsql::REAL)
-    .template clear<&mean_harm_clear>()
-    .template accumulate<&mean_harm_accumulate>()
+    .template clear<&mean_clear>()
+    .template accumulate<&mean_accumulate>()
     .build();
 }
 
@@ -1110,9 +1074,6 @@ VEF_GENERATE_ENTRY_POINTS(
     .func(make_chisq_indep_json_func("STATS_CHISQ_INDEP"))
     .func(make_kurtosis_json_func("STATS_KURTOSIS"))
     .func(make_cov_json_func("STATS_COVARIANCE"))
-    .func(make_mean_trim_func<&stats_mean_trimmed_result>("STATS_MEAN_TRIMMED"))
-    .func(make_mean_trim_func<&stats_mean_winsorized_result>("STATS_MEAN_WINSORIZED"))
-    .func(make_mean_geo_func<&stats_mean_geometric_result>("STATS_MEAN_GEOMETRIC"))
-    .func(make_mean_harm_func<&stats_mean_harmonic_result>("STATS_MEAN_HARMONIC"))
+    .func(make_mean_json_func("STATS_MEAN"))
     .func(make_anova_json_func("STATS_ANOVA"))
 )
