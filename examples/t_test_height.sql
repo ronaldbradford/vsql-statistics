@@ -79,7 +79,7 @@ SELECT
     IF(JSON_EXTRACT(ttest_json, '$.p_two_tail') < 0.05,
        'Reject Null — heights differ significantly',
        'Retain Null — no significant difference')  AS conclusion
-FROM ttest_results;
+FROM ttest_results\G
 
 DROP TABLE height_measurements;
 
