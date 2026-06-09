@@ -31,6 +31,9 @@ using vsql::RealArg;
 using vsql::RealResult;
 using vsql::StringResult;
 
+// Forward declaration — defined in the t-test section below.
+static std::string fmt_no_exp(double val);
+
 // =============================================================================
 // IQR family
 // =============================================================================
@@ -69,46 +72,42 @@ static std::optional<Quartiles> compute_quartiles(const StatsState &s) {
                    range_median(s.values, upper_start, n)};
 }
 
-static void stats_iqr_result(const StatsState &s, RealResult out) try {
-  const auto qr = compute_quartiles(s);
-  if (!qr) { out.set_null(); return; }
-  out.set(qr->q3 - qr->q1);
-} catch (...) { out.error("STATS_IQR: unexpected error"); }
-
-static void stats_q1_result(const StatsState &s, RealResult out) try {
-  const auto qr = compute_quartiles(s);
-  if (!qr) { out.set_null(); return; }
-  out.set(qr->q1);
-} catch (...) { out.error("STATS_Q1: unexpected error"); }
-
-static void stats_q3_result(const StatsState &s, RealResult out) try {
-  const auto qr = compute_quartiles(s);
-  if (!qr) { out.set_null(); return; }
-  out.set(qr->q3);
-} catch (...) { out.error("STATS_Q3: unexpected error"); }
-
-static void stats_median_result(const StatsState &s, RealResult out) try {
+static void stats_iqr_json_result(const StatsState &s, StringResult out) try {
   if (s.values.empty()) { out.set_null(); return; }
   std::sort(s.values.begin(), s.values.end());
-  out.set(range_median(s.values, 0, s.values.size()));
-} catch (...) { out.error("STATS_MEDIAN: unexpected error"); }
+  const size_t n = s.values.size();
 
-static void stats_iqr_lower_fence_result(const StatsState &s, RealResult out) try {
-  const auto qr = compute_quartiles(s);
-  if (!qr) { out.set_null(); return; }
-  out.set(qr->q1 - 1.5 * (qr->q3 - qr->q1));
-} catch (...) { out.error("STATS_IQR_LOWER_FENCE: unexpected error"); }
+  const double median = range_median(s.values, 0, n);
+  double q1, q3;
+  if (n == 1) {
+    q1 = q3 = s.values[0];
+  } else {
+    const size_t lower_end   = n / 2;
+    const size_t upper_start = (n % 2 == 1) ? lower_end + 1 : lower_end;
+    q1 = range_median(s.values, 0, lower_end);
+    q3 = range_median(s.values, upper_start, n);
+  }
+  const double iqr = q3 - q1;
 
-static void stats_iqr_upper_fence_result(const StatsState &s, RealResult out) try {
-  const auto qr = compute_quartiles(s);
-  if (!qr) { out.set_null(); return; }
-  out.set(qr->q3 + 1.5 * (qr->q3 - qr->q1));
-} catch (...) { out.error("STATS_IQR_UPPER_FENCE: unexpected error"); }
+  std::string json;
+  json.reserve(200);
+  auto append = [&](const char *key, double val) {
+    json += '"'; json += key; json += "\":"; json += fmt_no_exp(val);
+  };
+  json += '{';
+  append("q1",          q1);             json += ',';
+  append("median",      median);         json += ',';
+  append("q3",          q3);             json += ',';
+  append("iqr",         iqr);            json += ',';
+  append("lower_fence", q1 - 1.5 * iqr); json += ',';
+  append("upper_fence", q3 + 1.5 * iqr);
+  json += '}';
+  out.set(json);
+} catch (...) { out.error("STATS_IQR: unexpected error"); }
 
-template<auto ResultFn>
-static constexpr auto make_stats_func(const char *name) {
-  return vsql::make_aggregate_func<StatsState, ResultFn>(name)
-    .returns(vsql::REAL)
+static constexpr auto make_iqr_json_func(const char *name) {
+  return vsql::make_aggregate_func<StatsState, &stats_iqr_json_result>(name)
+    .returns(vsql::STRING)
     .param(vsql::REAL)
     .template clear<&stats_clear>()
     .template accumulate<&stats_accumulate>()
@@ -1059,12 +1058,7 @@ static constexpr auto make_anova_json_func(const char *name) {
 
 VEF_GENERATE_ENTRY_POINTS(
   vsql::make_extension()
-    .func(make_stats_func<&stats_iqr_result>("STATS_IQR"))
-    .func(make_stats_func<&stats_q1_result>("STATS_Q1"))
-    .func(make_stats_func<&stats_q3_result>("STATS_Q3"))
-    .func(make_stats_func<&stats_median_result>("STATS_MEDIAN"))
-    .func(make_stats_func<&stats_iqr_lower_fence_result>("STATS_IQR_LOWER_FENCE"))
-    .func(make_stats_func<&stats_iqr_upper_fence_result>("STATS_IQR_UPPER_FENCE"))
+    .func(make_iqr_json_func("STATS_IQR"))
     .func(make_ttest_func("STATS_TTEST"))
     .func(make_ttest_groups_func("STATS_TTEST_GROUPS"))
     .func(make_mode_json_func("STATS_MODE"))

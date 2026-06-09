@@ -1,49 +1,50 @@
---echo # vsql_statistics: IQR family aggregate functions
+--echo # vsql_statistics: IQR aggregate function
 
 INSTALL EXTENSION vsql_statistics;
 
---echo # --- Coffee shop dataset (9 integer rows) with CAST for decimal output ---
---echo # INT columns require CAST(col AS DOUBLE) to get decimal-precision results.
-CREATE TABLE espresso_sales (
-  daily_count INT NOT NULL CHECK (daily_count >= 0)
-);
+--echo # --- Coffee shop dataset (9 integer rows) ---
+--echo # sorted: 4,7,11,11,12,14,15,18,30
+--echo # Q1=Tukey hinge of lower 4: median(4,7,11,11)=9, Q3=median(14,15,18,30)=16.5
+--echo # median=12, IQR=7.5, lower_fence=9-11.25=-2.25, upper_fence=16.5+11.25=27.75
+CREATE TABLE espresso_sales (daily_count INT NOT NULL);
 INSERT INTO espresso_sales VALUES (7),(12),(15),(11),(4),(18),(14),(11),(30);
+SELECT CAST(STATS_IQR(CAST(daily_count AS DOUBLE)) AS CHAR) AS iqr FROM espresso_sales;
 
-SELECT STATS_IQR(CAST(daily_count AS DOUBLE))             AS iqr            FROM espresso_sales;
-SELECT STATS_Q1(CAST(daily_count AS DOUBLE))              AS q1             FROM espresso_sales;
-SELECT STATS_Q3(CAST(daily_count AS DOUBLE))              AS q3             FROM espresso_sales;
-SELECT STATS_MEDIAN(CAST(daily_count AS DOUBLE))          AS median         FROM espresso_sales;
-SELECT STATS_IQR_LOWER_FENCE(CAST(daily_count AS DOUBLE)) AS lower_fence    FROM espresso_sales;
-SELECT STATS_IQR_UPPER_FENCE(CAST(daily_count AS DOUBLE)) AS upper_fence    FROM espresso_sales;
+--echo # --- INT column without CAST: integer-rounded quartile values ---
+SELECT CAST(STATS_IQR(daily_count) AS CHAR) AS iqr_int FROM espresso_sales;
 
---echo # --- INT column without CAST returns integer-rounded results (expected) ---
-SELECT STATS_IQR(daily_count)    AS iqr_int FROM espresso_sales;
-SELECT STATS_MEDIAN(daily_count) AS med_int FROM espresso_sales;
+DROP TABLE espresso_sales;
 
 --echo # --- Edge case: single row ---
-CREATE TABLE single_row (v INT NOT NULL CHECK (v >= 0));
+CREATE TABLE single_row (v DOUBLE);
 INSERT INTO single_row VALUES (12);
-SELECT STATS_IQR(CAST(v AS DOUBLE)) AS iqr FROM single_row;
+SELECT CAST(STATS_IQR(v) AS CHAR) AS iqr FROM single_row;
+DROP TABLE single_row;
 
 --echo # --- Edge case: two rows ---
-CREATE TABLE two_rows (v INT NOT NULL CHECK (v >= 0));
+CREATE TABLE two_rows (v DOUBLE);
 INSERT INTO two_rows VALUES (5),(15);
-SELECT STATS_IQR(CAST(v AS DOUBLE)) AS iqr FROM two_rows;
+SELECT CAST(STATS_IQR(v) AS CHAR) AS iqr FROM two_rows;
+DROP TABLE two_rows;
 
---echo # --- Edge case: all-NULL group ---
+--echo # --- Edge case: all-NULL group returns NULL ---
 CREATE TABLE nullable_vals (v DOUBLE);
 INSERT INTO nullable_vals VALUES (NULL),(NULL),(NULL);
-SELECT STATS_IQR(v) AS iqr FROM nullable_vals;
+SELECT CAST(STATS_IQR(v) AS CHAR) AS iqr FROM nullable_vals;
+DROP TABLE nullable_vals;
 
---echo # --- Multiple groups via GROUP BY ---
-CREATE TABLE grouped_sales (region VARCHAR(10), amount INT NOT NULL CHECK (amount >= 0));
+--echo # --- GROUP BY: IQR computed independently per group ---
+CREATE TABLE grouped_sales (region VARCHAR(10), amount INT NOT NULL);
 INSERT INTO grouped_sales VALUES
   ('East',4),('East',7),('East',11),('East',11),('East',12),
   ('East',14),('East',15),('East',18),('East',30),
   ('West',1),('West',3),('West',5),('West',5),('West',6),
   ('West',7),('West',8),('West',9),('West',10);
-SELECT region, STATS_IQR(CAST(amount AS DOUBLE)) AS iqr FROM grouped_sales GROUP BY region ORDER BY region;
-
-DROP TABLE espresso_sales, single_row, two_rows, nullable_vals, grouped_sales;
+SELECT region,
+       CAST(STATS_IQR(CAST(amount AS DOUBLE)) AS CHAR) AS iqr
+FROM grouped_sales
+GROUP BY region
+ORDER BY region;
+DROP TABLE grouped_sales;
 
 UNINSTALL EXTENSION vsql_statistics;

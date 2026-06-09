@@ -6,7 +6,7 @@ Statistical aggregate functions for data scientists — IQR, quartiles, outlier 
 
 | Family | Count | Functions |
 |--------|------:|-----------|
-| **IQR** | 6 | `STATS_IQR`, `STATS_Q1`, `STATS_Q3`, `STATS_MEDIAN`, `STATS_IQR_LOWER_FENCE`, `STATS_IQR_UPPER_FENCE` |
+| **IQR** | 1 | `STATS_IQR` |
 | **T-test** | 2 | `STATS_TTEST`, `STATS_TTEST_GROUPS` |
 | **Mode** | 1 | `STATS_MODE` |
 | **Skewness** | 1 | `STATS_SKEWNESS` |
@@ -16,9 +16,9 @@ Statistical aggregate functions for data scientists — IQR, quartiles, outlier 
 | **Covariance** | 1 | `STATS_COVARIANCE` |
 | **Means** | 1 | `STATS_MEAN` |
 | **ANOVA** | 1 | `STATS_ANOVA` |
-| **Total** | **17** | |
+| **Total** | **12** | |
 
-> **Beta notice:** All functions in this extension (`STATS_IQR`, `STATS_TTEST`, `STATS_TTEST_GROUPS`, `STATS_MODE`, `STATS_SKEWNESS`, `STATS_ZTEST`, `STATS_CHISQ_*`, `STATS_KURTOSIS`, `STATS_COVARIANCE`, `STATS_MEAN`, `STATS_ANOVA`) are beta quality. They are functionally correct on the tested datasets but have not been validated at production scale. Use with caution in high-volume or precision-critical workloads and report any anomalies.
+> **Beta notice:** Functions in this extension (`STATS_IQR`, `STATS_TTEST`, `STATS_TTEST_GROUPS`, `STATS_MODE`, `STATS_SKEWNESS`, `STATS_ZTEST`, `STATS_CHISQ_*`, `STATS_KURTOSIS`, `STATS_COVARIANCE`, `STATS_MEAN`, `STATS_ANOVA`) are beta quality. They are functionally correct on the tested datasets but have not been validated at production scale. Use with caution in high-volume or precision-critical workloads and report any anomalies.
 
 
 ## Installing
@@ -40,12 +40,12 @@ INSTALL EXTENSION vsql_statistics;
 
 ```sql
 -- Detect outliers by region
-SELECT
-  region,
-  STATS_IQR_LOWER_FENCE(CAST(sale_amount AS DOUBLE)) AS lower_fence,
-  STATS_IQR_UPPER_FENCE(CAST(sale_amount AS DOUBLE)) AS upper_fence
-FROM daily_sales
-GROUP BY region;
+WITH i AS (SELECT region, CAST(STATS_IQR(CAST(sale_amount AS DOUBLE)) AS CHAR(300)) AS json
+           FROM daily_sales GROUP BY region)
+SELECT region,
+       JSON_EXTRACT(json, '$.lower_fence') AS lower_fence,
+       JSON_EXTRACT(json, '$.upper_fence') AS upper_fence
+FROM i;
 
 -- Test whether two groups differ (group column holds 1 or 2)
 -- STATS_TTEST returns inference stats; STATS_TTEST_GROUPS returns per-group descriptives.
@@ -140,20 +140,24 @@ FROM a;
 
 ### IQR Family
 
-| Function | Returns | Description |
-|---|---|---|
-| `STATS_IQR(col)` | `DOUBLE` | Interquartile range: Q3 − Q1 |
-| `STATS_Q1(col)` | `DOUBLE` | 25th percentile (Tukey's lower hinge) |
-| `STATS_Q3(col)` | `DOUBLE` | 75th percentile (Tukey's upper hinge) |
-| `STATS_MEDIAN(col)` | `DOUBLE` | 50th percentile |
-| `STATS_IQR_LOWER_FENCE(col)` | `DOUBLE` | Q1 − 1.5 × IQR (outlier lower bound) |
-| `STATS_IQR_UPPER_FENCE(col)` | `DOUBLE` | Q3 + 1.5 × IQR (outlier upper bound) |
+`STATS_IQR(col)` sorts the group once and returns a JSON STRING with all distribution summary fields:
 
-All IQR functions:
-- Accept any numeric column (`INT`, `DOUBLE`, etc.)
-- Skip NULL values; return NULL for an all-NULL group
-- Use Tukey's hinges (exclusive median) for quartile computation
-- Work with `GROUP BY`
+| Field | Description |
+|---|---|
+| `q1` | 25th percentile (Tukey's lower hinge) |
+| `median` | 50th percentile |
+| `q3` | 75th percentile (Tukey's upper hinge) |
+| `iqr` | Interquartile range: Q3 − Q1 |
+| `lower_fence` | Q1 − 1.5 × IQR (outlier lower bound) |
+| `upper_fence` | Q3 + 1.5 × IQR (outlier upper bound) |
+
+`STATS_IQR`:
+- Accepts any numeric column (`INT`, `DOUBLE`, etc.)
+- Skips NULL values; returns NULL for an all-NULL group
+- Uses Tukey's hinges (exclusive median) for quartile computation
+- Works with `GROUP BY`
+
+Use `CAST(STATS_IQR(...) AS CHAR)` to read results in the mysql CLI.
 
 ### Two-Sample t-Test Family (equal variances / pooled variance)
 
@@ -264,9 +268,7 @@ Interpretation: positive covariance means x and y increase together; negative me
 
 Use `CAST(STATS_COVARIANCE(...) AS CHAR)` to read results in the mysql CLI.
 
-### Means Family *(beta)*
-
-> These functions are beta quality — see the notice at the top of this document.
+### Means Family
 
 `STATS_MEAN(value, trim_pct)` computes all four robust/ratio means in one pass and returns a JSON STRING:
 

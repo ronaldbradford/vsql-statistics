@@ -8,7 +8,7 @@ This file provides guidance to AI coding assistants when working with code in th
 
 `vsql-statistics` is a VillageSQL extension that provides statistical aggregate functions for data scientists. It implements two families of functions:
 
-- **IQR family (6 functions):** `STATS_IQR`, `STATS_Q1`, `STATS_Q3`, `STATS_MEDIAN`, `STATS_IQR_LOWER_FENCE`, `STATS_IQR_UPPER_FENCE`
+- **IQR family (1 JSON function):** `STATS_IQR`
 - **Two-sample t-test family (2 JSON functions):** `STATS_TTEST`, `STATS_TTEST_GROUPS`
 - **Mode family (1 JSON function):** `STATS_MODE`
 - **Skewness family (1 JSON function):** `STATS_SKEWNESS`
@@ -44,7 +44,7 @@ struct StatsState {
     std::vector<double> values;
 };
 ```
-The IQR family (6 functions) shares one `StatsState` with a single `values` vector, a shared `clear()` and `accumulate()`. Each function has its own `result()` that sorts and computes the statistic.
+The IQR family (1 JSON function) uses `StatsState` (vector of doubles). `STATS_IQR(col)` sorts once and returns a JSON STRING `{"q1":..., "median":..., "q3":..., "iqr":..., "lower_fence":..., "upper_fence":...}` using Tukey's hinges for quartiles and the standard 1.5×IQR fence rule. Returns NULL when no values were accumulated. Use `CAST(... AS CHAR)` to read results in the mysql CLI.
 
 The t-test family (2 JSON functions) uses `TTestState` with separate `group1`/`group2` vectors and a stored `alpha`. Group membership is passed as the second argument (1 = group 1, 2 = group 2). `STATS_TTEST(value, group, alpha)` returns a JSON STRING with `{pooled_var, df, t, p_one_tail, t_crit_one_tail, p_two_tail, t_crit_two_tail}`; `STATS_TTEST_GROUPS(value, group)` returns `{mean_1, mean_2, variance_1, variance_2, n_1, n_2}`.
 
@@ -74,7 +74,7 @@ The ANOVA family (1 JSON function) uses `AnovaState` — an `unordered_map<doubl
 **Function registration:** `make_aggregate_func<StatsState, &result_fn>(name).returns(REAL).param(REAL).clear<&stats_clear>().accumulate<&stats_accumulate>().build()`
 
 **Key files:**
-- `src/vsql_statistics.cc` — all 17 aggregate functions (6 IQR + 2 t-test + 1 mode + 1 skewness + 1 z-test + 2 chi-squared + 1 kurtosis + 1 covariance + 1 means + 1 ANOVA)
+- `src/vsql_statistics.cc` — all 12 aggregate functions (1 IQR + 2 t-test + 1 mode + 1 skewness + 1 z-test + 2 chi-squared + 1 kurtosis + 1 covariance + 1 means + 1 ANOVA)
 - `manifest.json` — extension metadata
 - `CMakeLists.txt` — build configuration
 - `cmake/FindVillageSQL.cmake` — SDK discovery
@@ -106,7 +106,7 @@ See `TESTING.md` for full instructions.
 
 ```sql
 INSTALL EXTENSION vsql_statistics;
-SELECT STATS_IQR(CAST(col AS DOUBLE)) FROM t GROUP BY group_col;
+SELECT CAST(STATS_IQR(CAST(col AS DOUBLE)) AS CHAR) FROM t GROUP BY group_col;
 SELECT CAST(STATS_TTEST(value, grp, 0.05) AS CHAR) FROM t;
 SELECT CAST(STATS_TTEST_GROUPS(value, grp) AS CHAR) FROM t;
 SELECT CAST(STATS_MODE(CAST(col AS DOUBLE)) AS CHAR) FROM t;
