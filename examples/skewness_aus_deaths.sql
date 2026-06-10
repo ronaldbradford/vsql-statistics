@@ -105,31 +105,45 @@ INSERT INTO aus_deaths_by_age VALUES
 -- ============================================================================
 
 WITH
-d AS (
+-- Digits 0-9 (named 'digit' to avoid clash with the alias 'd' below)
+digit AS (
     SELECT 0 n UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4
     UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9
 ),
+-- Cross-join produces 1..100000; HAVING trims to the largest bin (15430)
 nums AS (
     SELECT a.n + b.n * 10 + c.n * 100 + d.n * 1000 + e.n * 10000 + 1 AS n
-    FROM d a, d b, d c, d d, d e
+    FROM digit a, digit b, digit c, digit d, digit e
     HAVING n <= 15430
 ),
+-- Expand each age band to (deaths) copies of its midpoint
 obs AS (
-    SELECT a.sex, a.midpoint
-    FROM aus_deaths_by_age a
-    JOIN nums ON nums.n <= a.deaths
+    SELECT s.sex, s.midpoint
+    FROM aus_deaths_by_age s
+    JOIN nums ON nums.n <= s.deaths
+),
+-- Compute each aggregate once — calling the same VEF aggregate multiple
+-- times in one SELECT returns malformed output on subsequent calls
+stats AS (
+    SELECT
+        sex,
+        COUNT(*)                                    AS total_deaths,
+        AVG(midpoint)                               AS mean_age,
+        CAST(STATS_IQR(midpoint)      AS CHAR(500)) AS iqr_json,
+        CAST(STATS_SKEWNESS(midpoint) AS CHAR(500)) AS skew_json
+    FROM obs
+    GROUP BY sex
 )
 SELECT
-    CASE sex WHEN 'M' THEN 'Male' ELSE 'Female' END               AS sex,
-    COUNT(*)                                                        AS total_deaths,
-    ROUND(AVG(midpoint), 1)                                        AS mean_age,
-    JSON_EXTRACT(CAST(STATS_IQR(midpoint)      AS CHAR(200)), '$.median') AS median_age,
-    JSON_EXTRACT(CAST(STATS_IQR(midpoint)      AS CHAR(200)), '$.q1')     AS q1_age,
-    JSON_EXTRACT(CAST(STATS_IQR(midpoint)      AS CHAR(200)), '$.q3')     AS q3_age,
-    JSON_EXTRACT(CAST(STATS_SKEWNESS(midpoint) AS CHAR(200)), '$.moment') AS skewness_moment,
-    JSON_EXTRACT(CAST(STATS_SKEWNESS(midpoint) AS CHAR(200)), '$.pearson') AS skewness_pearson
-FROM obs
-GROUP BY sex
+    CASE sex WHEN 'M' THEN 'Male' ELSE 'Female' END AS sex,
+    total_deaths,
+    ROUND(mean_age, 1)                              AS mean_age,
+    JSON_EXTRACT(iqr_json,  '$.median')             AS median_age,
+    JSON_EXTRACT(iqr_json,  '$.q1')                 AS q1_age,
+    JSON_EXTRACT(iqr_json,  '$.q3')                 AS q3_age,
+    JSON_EXTRACT(skew_json, '$.moment')             AS skewness_moment,
+    JSON_EXTRACT(skew_json, '$.pearson')            AS skewness_pearson
+FROM stats
 ORDER BY sex\G
 
 DROP TABLE aus_deaths_by_age;
