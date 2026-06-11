@@ -80,9 +80,9 @@ INSERT INTO fuel_economy VALUES
 SELECT
     fuel_type,
     COUNT(*)                              AS n,
-    ROUND(AVG(mpg), 4)                    AS mean_mpg,
-    ROUND(STATS_IQR(mpg), 4)              AS iqr_mpg,
-    ROUND(STATS_MEDIAN(mpg), 4)           AS median_mpg
+    ROUND(AVG(mpg), 4)                                          AS mean_mpg,
+    ROUND(JSON_EXTRACT(CAST(STATS_IQR(mpg) AS CHAR(300)), '$.median'), 4) AS median_mpg,
+    ROUND(JSON_EXTRACT(CAST(STATS_IQR(mpg) AS CHAR(300)), '$.iqr'),    4) AS iqr_mpg
 FROM fuel_economy
 GROUP BY fuel_type
 ORDER BY fuel_type;
