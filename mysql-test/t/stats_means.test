@@ -30,6 +30,11 @@ INSERT INTO means_data VALUES (10,0.5),(20,0.5);
 SELECT CAST(STATS_MEAN(val, trim_pct) AS CHAR) AS means FROM means_data;
 DELETE FROM means_data;
 
+--echo # --- Negative trim_pct: invalid, trimmed/winsorized are null ---
+INSERT INTO means_data VALUES (10,-0.1),(20,-0.1),(30,-0.1);
+SELECT CAST(STATS_MEAN(val, trim_pct) AS CHAR) AS means FROM means_data;
+DELETE FROM means_data;
+
 --echo # --- All-NULL values: whole result is NULL ---
 INSERT INTO means_data VALUES (NULL,0.2),(NULL,0.2);
 SELECT CAST(STATS_MEAN(val, trim_pct) AS CHAR) AS means FROM means_data;

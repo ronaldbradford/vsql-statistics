@@ -54,6 +54,16 @@ INSERT INTO chisq_indep VALUES (60,40),(40,60),(20,40),(80,60);
 SELECT CAST(STATS_CHISQ_INDEP(observed, expected, 0.0, 0.0) AS CHAR) AS indep FROM chisq_indep;
 DELETE FROM chisq_indep;
 
+# --- Independence: fractional dims floor (2.7 → 2, 3.9 → 3): df=(2-1)(3-1)=2 ---
+INSERT INTO chisq_indep VALUES (60,40),(40,60),(20,40),(80,60);
+SELECT CAST(STATS_CHISQ_INDEP(observed, expected, 2.7, 3.9) AS CHAR) AS indep FROM chisq_indep;
+DELETE FROM chisq_indep;
+
+# --- Independence: dimension below 1 (floor=0) → df/p are null, never negative ---
+INSERT INTO chisq_indep VALUES (60,40),(40,60),(20,40),(80,60);
+SELECT CAST(STATS_CHISQ_INDEP(observed, expected, 0.5, 3.0) AS CHAR) AS indep FROM chisq_indep;
+DELETE FROM chisq_indep;
+
 DROP TABLE chisq_indep;
 
 # --- GROUP BY: GoF computed independently per group ---

@@ -39,6 +39,16 @@ INSERT INTO ztest_data VALUES (510.0),(520.0),(530.0);
 SELECT CAST(STATS_ZTEST(val, 500.0, 0.0) AS CHAR) AS ztest FROM ztest_data;
 DELETE FROM ztest_data;
 
+--echo # --- Negative sigma: returns NULL ---
+INSERT INTO ztest_data VALUES (510.0),(520.0),(530.0);
+SELECT CAST(STATS_ZTEST(val, 500.0, -4.0) AS CHAR) AS ztest FROM ztest_data;
+DELETE FROM ztest_data;
+
+--echo # --- Extreme Z: tiny p-values flush to 0 (fixed-notation formatting) ---
+INSERT INTO ztest_data VALUES (1000.0),(1000.0),(1000.0),(1000.0);
+SELECT CAST(STATS_ZTEST(val, 500.0, 1.0) AS CHAR) AS ztest FROM ztest_data;
+DELETE FROM ztest_data;
+
 --echo # --- Negative Z (mean < mu): p_one_tail > 0.5 ---
 INSERT INTO ztest_data VALUES (490.0),(490.0),(490.0),(490.0);
 SELECT CAST(STATS_ZTEST(val, 500.0, 2.0) AS CHAR) AS ztest FROM ztest_data;

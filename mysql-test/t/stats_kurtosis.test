@@ -20,6 +20,11 @@ DELETE FROM kurt_data;
 INSERT INTO kurt_data VALUES (1),(2),(3);
 SELECT CAST(STATS_KURTOSIS(val) AS CHAR) AS kurtosis FROM kurt_data;
 
+# --- Four-value group: smallest n where excess is defined ---
+DELETE FROM kurt_data;
+INSERT INTO kurt_data VALUES (1),(2),(3),(4);
+SELECT CAST(STATS_KURTOSIS(val) AS CHAR) AS kurtosis FROM kurt_data;
+
 # --- All-NULL group: returns NULL ---
 DELETE FROM kurt_data;
 INSERT INTO kurt_data VALUES (NULL),(NULL),(NULL);

@@ -34,6 +34,11 @@ INSERT INTO skew_data VALUES (42);
 SELECT CAST(STATS_SKEWNESS(val) AS CHAR) AS skewness FROM skew_data;
 DELETE FROM skew_data;
 
+# --- Two rows: minimum n; symmetric pair gives moment=0, pearson=0 ---
+INSERT INTO skew_data VALUES (1),(3);
+SELECT CAST(STATS_SKEWNESS(val) AS CHAR) AS skewness FROM skew_data;
+DELETE FROM skew_data;
+
 # --- All equal values: variance is zero, both fields are null ---
 INSERT INTO skew_data VALUES (5),(5),(5),(5),(5);
 SELECT CAST(STATS_SKEWNESS(val) AS CHAR) AS skewness FROM skew_data;

@@ -42,6 +42,7 @@ The `build.sh` script runs cmake and cmake --build. The `.veb` bundle is created
 ```cpp
 struct StatsState {
     std::vector<double> values;
+    bool oom = false;  // allocation failed during accumulate; result reports error
 };
 ```
 The IQR family (1 JSON function) uses `StatsState` (vector of doubles). `STATS_IQR(col)` sorts once and returns a JSON STRING `{"q1":..., "median":..., "q3":..., "iqr":..., "lower_fence":..., "upper_fence":...}` using Tukey's hinges for quartiles and the standard 1.5×IQR fence rule. Returns NULL when no values were accumulated. Use `CAST(... AS CHAR)` to read results in the mysql CLI.
@@ -124,7 +125,13 @@ UNINSTALL EXTENSION vsql_statistics;
 
 ## Conventions
 
-- All entry points wrapped in `try/catch (...)`
-- NULL check before any field access inside every VDF
+- All entry points wrapped in `try/catch (...)` — including allocating accumulate
+  callbacks, which latch an `oom` flag on the state; the result function then
+  reports the failure via `out.error()` instead of letting an exception escape
+- Inputs that are NULL, NaN, or ±Inf are skipped (shared `finite_value()` helper)
+  so emitted JSON can never contain invalid `nan`/`inf` tokens
+- Result functions never mutate accumulated state (sort a local copy when needed)
+- JSON fields are emitted via the shared `append_field()` helpers; the
+  `std::optional<double>` overload emits the JSON literal `null`
 - No global mutable state (re-entrant)
 - C++17 required

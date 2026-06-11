@@ -65,6 +65,15 @@ INSERT INTO anova_zero_within VALUES
 SELECT CAST(STATS_ANOVA(value, grp) AS CHAR) AS anova FROM anova_zero_within;
 DROP TABLE anova_zero_within;
 
+--echo # --- k=2 groups: allowed; equivalent to pooled t-test (F = t² = 1) ---
+--echo # Same data as the STATS_TTEST basic dataset where t=1.0
+CREATE TABLE anova_two_groups (value DOUBLE, grp INT);
+INSERT INTO anova_two_groups VALUES
+  (100,1),(110,1),(120,1),(130,1),(140,1),
+  (90,2),(100,2),(110,2),(120,2),(130,2);
+SELECT CAST(STATS_ANOVA(value, grp) AS CHAR) AS anova FROM anova_two_groups;
+DROP TABLE anova_two_groups;
+
 --echo # --- GROUP BY: two independent ANOVA tests in one query ---
 --echo # Exp 1: spec vector, F=18
 --echo # Exp 2: groups {10-14},{20-24},{30-34} — same within spread, larger between, F=200

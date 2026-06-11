@@ -31,24 +31,76 @@ using vsql::RealArg;
 using vsql::RealResult;
 using vsql::StringResult;
 
-// Forward declaration — defined in the t-test section below.
-static std::string fmt_no_exp(double val);
+// =============================================================================
+// Shared utilities
+// =============================================================================
+
+// Convergence parameters shared by the series / continued-fraction evaluators
+// (incomplete beta and incomplete gamma).
+static constexpr int    max_series_iter = 500;
+static constexpr double lentz_tiny      = 1e-30;  // Lentz floor to avoid division by zero
+static constexpr double converge_eps    = 1e-12;
+
+// Returns the argument's value when it is non-NULL and finite. Filters NULL,
+// NaN, and ±Inf in one place so downstream arithmetic can never produce
+// "nan"/"inf" tokens, which are invalid JSON.
+static std::optional<double> finite_value(RealArg v) {
+  if (v.is_null() || !std::isfinite(v.value())) return std::nullopt;
+  return v.value();
+}
+
+// Format a double without scientific notation. Uses fixed notation (trimmed) for
+// values where %g would emit an exponent (|val| < 1e-4), and %g otherwise.
+// Magnitudes below ~5e-16 flush to "0.0" — a deliberate trade-off to keep
+// fixed-notation output; see mysql-test/t/stats_ztest.test for the pinned case.
+static std::string fmt_no_exp(double val) {
+  char buf[64];
+  if (val != 0.0 && std::fabs(val) < 1e-4) {
+    std::snprintf(buf, sizeof(buf), "%.15f", val);
+    // Trim trailing zeros, but keep at least one decimal digit.
+    std::string s(buf);
+    const size_t dot = s.find('.');
+    if (dot != std::string::npos) {
+      size_t last = s.find_last_not_of('0');
+      if (last != std::string::npos && last > dot) s.erase(last + 1);
+      else if (last == dot)                         s.erase(dot + 2);
+    }
+    return s;
+  }
+  std::snprintf(buf, sizeof(buf), "%.15g", val);
+  return std::string(buf);
+}
+
+// Appends "key":<value> to json (no surrounding braces or separators).
+static void append_field(std::string &json, const char *key, double val) {
+  json += '"'; json += key; json += "\":";
+  json += fmt_no_exp(val);
+}
+
+// Nullable variant: emits the JSON literal null when val is empty.
+static void append_field(std::string &json, const char *key,
+                         const std::optional<double> &val) {
+  json += '"'; json += key; json += "\":";
+  json += val ? fmt_no_exp(*val) : "null";
+}
 
 // =============================================================================
 // IQR family
 // =============================================================================
 
 struct StatsState {
-  mutable std::vector<double> values;
+  std::vector<double> values;
+  bool oom = false;  // allocation failed during accumulate; result reports error
 };
 
 static void stats_clear(StatsState &s) {
   s.values.clear();
+  s.oom = false;
 }
 
-static void stats_accumulate(StatsState &s, RealArg v) {
-  if (!v.is_null() && !std::isnan(v.value())) s.values.push_back(v.value());
-}
+static void stats_accumulate(StatsState &s, RealArg v) try {
+  if (const auto x = finite_value(v)) s.values.push_back(*x);
+} catch (...) { s.oom = true; }
 
 // Median of a sorted sub-range [lo, hi).
 static double range_median(const std::vector<double> &v, size_t lo, size_t hi) {
@@ -58,49 +110,39 @@ static double range_median(const std::vector<double> &v, size_t lo, size_t hi) {
   return (n % 2 == 1) ? v[mid] : (v[mid - 1] + v[mid]) / 2.0;
 }
 
-struct Quartiles { double q1, q3; };
+struct Quartiles { double q1, median, q3; };
 
-// Sorts values and computes Q1, Q3 using Tukey's hinges (exclusive median).
-static std::optional<Quartiles> compute_quartiles(const StatsState &s) {
-  if (s.values.empty()) return std::nullopt;
-  std::sort(s.values.begin(), s.values.end());
-  const size_t n = s.values.size();
-  if (n == 1) return Quartiles{s.values[0], s.values[0]};
-  const size_t lower_end = n / 2;
+// Computes the median and Q1/Q3 using Tukey's hinges (exclusive median).
+// Precondition: sorted is non-empty and in ascending order.
+static Quartiles compute_quartiles(const std::vector<double> &sorted) {
+  const size_t n = sorted.size();
+  const double median = range_median(sorted, 0, n);
+  if (n == 1) return Quartiles{sorted[0], median, sorted[0]};
+  const size_t lower_end   = n / 2;
   const size_t upper_start = (n % 2 == 1) ? lower_end + 1 : lower_end;
-  return Quartiles{range_median(s.values, 0, lower_end),
-                   range_median(s.values, upper_start, n)};
+  return Quartiles{range_median(sorted, 0, lower_end), median,
+                   range_median(sorted, upper_start, n)};
 }
 
 static void stats_iqr_json_result(const StatsState &s, StringResult out) try {
+  if (s.oom) { out.error("STATS_IQR: out of memory"); return; }
   if (s.values.empty()) { out.set_null(); return; }
-  std::sort(s.values.begin(), s.values.end());
-  const size_t n = s.values.size();
 
-  const double median = range_median(s.values, 0, n);
-  double q1, q3;
-  if (n == 1) {
-    q1 = q3 = s.values[0];
-  } else {
-    const size_t lower_end   = n / 2;
-    const size_t upper_start = (n % 2 == 1) ? lower_end + 1 : lower_end;
-    q1 = range_median(s.values, 0, lower_end);
-    q3 = range_median(s.values, upper_start, n);
-  }
-  const double iqr = q3 - q1;
+  std::vector<double> sorted(s.values);
+  std::sort(sorted.begin(), sorted.end());
+  const Quartiles q = compute_quartiles(sorted);
+  const double iqr = q.q3 - q.q1;
+  constexpr double fence_mult = 1.5;  // Tukey's standard fence multiplier
 
   std::string json;
   json.reserve(200);
-  auto append = [&](const char *key, double val) {
-    json += '"'; json += key; json += "\":"; json += fmt_no_exp(val);
-  };
   json += '{';
-  append("q1",          q1);             json += ',';
-  append("median",      median);         json += ',';
-  append("q3",          q3);             json += ',';
-  append("iqr",         iqr);            json += ',';
-  append("lower_fence", q1 - 1.5 * iqr); json += ',';
-  append("upper_fence", q3 + 1.5 * iqr);
+  append_field(json, "q1",          q.q1);                json += ',';
+  append_field(json, "median",      q.median);            json += ',';
+  append_field(json, "q3",          q.q3);                json += ',';
+  append_field(json, "iqr",         iqr);                 json += ',';
+  append_field(json, "lower_fence", q.q1 - fence_mult * iqr); json += ',';
+  append_field(json, "upper_fence", q.q3 + fence_mult * iqr);
   json += '}';
   out.set(json);
 } catch (...) { out.error("STATS_IQR: unexpected error"); }
@@ -122,6 +164,7 @@ struct TTestState {
   std::vector<double> group1;
   std::vector<double> group2;
   double alpha{0.05};
+  bool oom = false;
 };
 
 static void ttest_clear(TTestState &s) {
@@ -130,55 +173,54 @@ static void ttest_clear(TTestState &s) {
 
 // Accumulate for 2-parameter functions (value, group).
 // group == 1.0 → group1, group == 2.0 → group2; other values are ignored.
-static void ttest_accumulate(TTestState &s, RealArg value, RealArg group) {
-  if (value.is_null() || group.is_null()) return;
-  const double v = value.value();
-  const double g = group.value();
-  if (std::isnan(v) || std::isnan(g)) return;
-  if (g == 1.0)      s.group1.push_back(v);
-  else if (g == 2.0) s.group2.push_back(v);
-}
+static void ttest_accumulate(TTestState &s, RealArg value, RealArg group) try {
+  const auto v = finite_value(value);
+  const auto g = finite_value(group);
+  if (!v || !g) return;
+  if (*g == 1.0)      s.group1.push_back(*v);
+  else if (*g == 2.0) s.group2.push_back(*v);
+} catch (...) { s.oom = true; }
 
 // Accumulate for 3-parameter functions (value, group, alpha).
+// alpha: last non-NULL finite value wins (constant per group in practice).
 static void ttest_crit_accumulate(TTestState &s, RealArg value, RealArg group,
                                    RealArg alpha) {
   ttest_accumulate(s, value, group);
-  if (!alpha.is_null() && !std::isnan(alpha.value())) s.alpha = alpha.value();
+  if (const auto a = finite_value(alpha)) s.alpha = *a;
 }
 
 // Continued fraction core for the regularized incomplete beta function.
-// Uses Lentz's algorithm. Precondition: x < (a+1)/(a+b+2).
+// Uses Lentz's algorithm (Numerical Recipes §6.4); the multi-statement lines
+// below are the canonical NR formulation. Precondition: x < (a+1)/(a+b+2).
 static double betacf(double x, double a, double b) {
-  constexpr int    max_iter = 500;
-  constexpr double tiny     = 1e-30;
-  constexpr double eps      = 1e-12;
-
   const double qab = a + b;
   const double qap = a + 1.0;
   const double qam = a - 1.0;
   double c = 1.0;
   double d = 1.0 - qab * x / qap;
-  if (std::fabs(d) < tiny) d = tiny;
+  if (std::fabs(d) < lentz_tiny) d = lentz_tiny;
   d = 1.0 / d;
   double h = d;
 
-  for (int m = 1; m <= max_iter; m++) {
+  for (int m = 1; m <= max_series_iter; m++) {
     const int m2 = 2 * m;
     // Even step
     double aa = static_cast<double>(m) * (b - static_cast<double>(m)) * x
                 / ((qam + m2) * (a + m2));
-    d = 1.0 + aa * d; if (std::fabs(d) < tiny) d = tiny; d = 1.0 / d;
-    c = 1.0 + aa / c; if (std::fabs(c) < tiny) c = tiny;
+    d = 1.0 + aa * d; if (std::fabs(d) < lentz_tiny) d = lentz_tiny; d = 1.0 / d;
+    c = 1.0 + aa / c; if (std::fabs(c) < lentz_tiny) c = lentz_tiny;
     h *= d * c;
     // Odd step
     aa = -(a + static_cast<double>(m)) * (qab + static_cast<double>(m)) * x
          / ((a + m2) * (qap + m2));
-    d = 1.0 + aa * d; if (std::fabs(d) < tiny) d = tiny; d = 1.0 / d;
-    c = 1.0 + aa / c; if (std::fabs(c) < tiny) c = tiny;
+    d = 1.0 + aa * d; if (std::fabs(d) < lentz_tiny) d = lentz_tiny; d = 1.0 / d;
+    c = 1.0 + aa / c; if (std::fabs(c) < lentz_tiny) c = lentz_tiny;
     const double del = d * c;
     h *= del;
-    if (std::fabs(del - 1.0) < eps) break;
+    if (std::fabs(del - 1.0) < converge_eps) break;
   }
+  // If max_series_iter is reached without convergence the current estimate is
+  // returned; for the df ranges reachable through SQL this does not occur.
   return h;
 }
 
@@ -264,60 +306,36 @@ static std::optional<TTestResult> compute_ttest(const TTestState &s) {
                      pooled_var, df, t};
 }
 
-// Format a double without scientific notation. Uses fixed notation (trimmed) for
-// values where %g would emit an exponent (|val| < 1e-4), and %g otherwise.
-static std::string fmt_no_exp(double val) {
-  char buf[64];
-  if (val != 0.0 && std::fabs(val) < 1e-4) {
-    std::snprintf(buf, sizeof(buf), "%.15f", val);
-    // Trim trailing zeros, but keep at least one decimal digit.
-    std::string s(buf);
-    const size_t dot = s.find('.');
-    if (dot != std::string::npos) {
-      size_t last = s.find_last_not_of('0');
-      if (last != std::string::npos && last > dot) s.erase(last + 1);
-      else if (last == dot)                         s.erase(dot + 2);
-    }
-    return s;
-  }
-  std::snprintf(buf, sizeof(buf), "%.15g", val);
-  return std::string(buf);
-}
-
 // Inference statistics only: pooled_var, df, t, p_one_tail, t_crit_one_tail,
 // p_two_tail, t_crit_two_tail. t_crit_* are null when alpha is out of range.
 // Kept separate from per-group descriptives to stay within the VEF 255-byte
 // STRING limit (see villagesql/villagesql-server#641).
 static void stats_ttest_result(const TTestState &s, StringResult out) try {
+  if (s.oom) { out.error("STATS_TTEST: out of memory"); return; }
   const auto r = compute_ttest(s);
   if (!r) { out.set_null(); return; }
 
-  const double p_one    = t_two_tail_p(r->t_stat, r->df) / 2.0;
-  const double p_two    = t_two_tail_p(r->t_stat, r->df);
-  const double alpha    = s.alpha;
-  const double alpha_h  = alpha / 2.0;
-  const bool   crit_ok  = !std::isnan(alpha) && alpha > 0.0 && alpha < 1.0;
-  const bool   crit2_ok = !std::isnan(alpha_h) && alpha_h > 0.0 && alpha_h < 0.5;
+  const double p_one = t_two_tail_p(r->t_stat, r->df) / 2.0;
+  const double p_two = t_two_tail_p(r->t_stat, r->df);
+  const double alpha = s.alpha;
+  // alpha ∈ (0,1) also guarantees alpha/2 ∈ (0,0.5), so one check covers both
+  // critical values.
+  const bool crit_ok = alpha > 0.0 && alpha < 1.0;
+  const std::optional<double> crit_one = crit_ok
+    ? std::optional<double>(t_critical(alpha, r->df)) : std::nullopt;
+  const std::optional<double> crit_two = crit_ok
+    ? std::optional<double>(t_critical(alpha / 2.0, r->df)) : std::nullopt;
 
   std::string json;
   json.reserve(256);
-
-  auto append = [&](const char *key, double val) {
-    json += '"'; json += key; json += "\":";
-    json += fmt_no_exp(val);
-  };
-
   json += '{';
-  append("pooled_var",  r->pooled_var); json += ',';
-  append("df",          r->df);         json += ',';
-  append("t",           r->t_stat);     json += ',';
-  append("p_one_tail",  p_one);         json += ',';
-  json += "\"t_crit_one_tail\":";
-  json += crit_ok  ? fmt_no_exp(t_critical(alpha,   r->df)) : "null";
-  json += ',';
-  append("p_two_tail",  p_two);         json += ',';
-  json += "\"t_crit_two_tail\":";
-  json += crit2_ok ? fmt_no_exp(t_critical(alpha_h, r->df)) : "null";
+  append_field(json, "pooled_var",      r->pooled_var); json += ',';
+  append_field(json, "df",              r->df);         json += ',';
+  append_field(json, "t",               r->t_stat);     json += ',';
+  append_field(json, "p_one_tail",      p_one);         json += ',';
+  append_field(json, "t_crit_one_tail", crit_one);      json += ',';
+  append_field(json, "p_two_tail",      p_two);         json += ',';
+  append_field(json, "t_crit_two_tail", crit_two);
   json += '}';
 
   out.set(json);
@@ -326,24 +344,19 @@ static void stats_ttest_result(const TTestState &s, StringResult out) try {
 // Per-group descriptives: mean, sample variance, and observation count for
 // each group. Complements STATS_TTEST — use both together for a full picture.
 static void stats_ttest_groups_result(const TTestState &s, StringResult out) try {
+  if (s.oom) { out.error("STATS_TTEST_GROUPS: out of memory"); return; }
   const auto r = compute_ttest(s);
   if (!r) { out.set_null(); return; }
 
   std::string json;
   json.reserve(200);
-
-  auto append = [&](const char *key, double val) {
-    json += '"'; json += key; json += "\":";
-    json += fmt_no_exp(val);
-  };
-
   json += '{';
-  append("mean_1",     r->mean1); json += ',';
-  append("mean_2",     r->mean2); json += ',';
-  append("variance_1", r->var1);  json += ',';
-  append("variance_2", r->var2);  json += ',';
-  append("n_1",        r->n1);    json += ',';
-  append("n_2",        r->n2);
+  append_field(json, "mean_1",     r->mean1); json += ',';
+  append_field(json, "mean_2",     r->mean2); json += ',';
+  append_field(json, "variance_1", r->var1);  json += ',';
+  append_field(json, "variance_2", r->var2);  json += ',';
+  append_field(json, "n_1",        r->n1);    json += ',';
+  append_field(json, "n_2",        r->n2);
   json += '}';
 
   out.set(json);
@@ -376,15 +389,17 @@ static constexpr auto make_ttest_groups_func(const char *name) {
 
 struct ModeState {
   std::unordered_map<double, size_t> freq;
+  bool oom = false;
 };
 
 static void mode_clear(ModeState &s) {
   s.freq.clear();
+  s.oom = false;
 }
 
-static void mode_accumulate(ModeState &s, RealArg v) {
-  if (!v.is_null() && !std::isnan(v.value())) s.freq[v.value()]++;
-}
+static void mode_accumulate(ModeState &s, RealArg v) try {
+  if (const auto x = finite_value(v)) s.freq[*x]++;
+} catch (...) { s.oom = true; }
 
 // Returns empty if all-NULL input or no value repeats (max freq == 1).
 static std::vector<double> compute_modes(const ModeState &s) {
@@ -408,6 +423,7 @@ static std::vector<double> compute_modes(const ModeState &s) {
 // values: sorted array of all mode values. min/max: first and last for convenience.
 // NULL when no value repeats (max frequency == 1) or all inputs are NULL/NaN.
 static void stats_mode_json_result(const ModeState &s, StringResult out) try {
+  if (s.oom) { out.error("STATS_MODE: out of memory"); return; }
   const auto modes = compute_modes(s);
   if (modes.empty()) { out.set_null(); return; }
 
@@ -444,6 +460,7 @@ static constexpr auto make_mode_json_func(const char *name) {
 // pearson: 3 × (mean − median) / population_stddev.
 // Both are null when variance is zero; the whole result is null when n < 2.
 static void stats_skewness_json_result(const StatsState &s, StringResult out) try {
+  if (s.oom) { out.error("STATS_SKEWNESS: out of memory"); return; }
   const size_t n = s.values.size();
   if (n < 2) { out.set_null(); return; }
 
@@ -458,21 +475,21 @@ static void stats_skewness_json_result(const StatsState &s, StringResult out) tr
   }
   const double m2 = sum2 / dn;
 
+  std::optional<double> moment;
+  std::optional<double> pearson;
+  if (m2 > 0.0) {
+    std::vector<double> sorted(s.values);
+    std::sort(sorted.begin(), sorted.end());
+    const double stddev = std::sqrt(m2);
+    moment  = (sum3 / dn) / std::pow(m2, 1.5);
+    pearson = 3.0 * (mean - range_median(sorted, 0, n)) / stddev;
+  }
+
   std::string json;
   json.reserve(128);
   json += '{';
-
-  if (m2 <= 0.0) {
-    json += "\"moment\":null,\"pearson\":null";
-  } else {
-    std::sort(s.values.begin(), s.values.end());
-    const double stddev = std::sqrt(m2);
-    json += "\"moment\":";
-    json += fmt_no_exp((sum3 / dn) / std::pow(m2, 1.5));
-    json += ",\"pearson\":";
-    json += fmt_no_exp(3.0 * (mean - range_median(s.values, 0, n)) / stddev);
-  }
-
+  append_field(json, "moment",  moment);  json += ',';
+  append_field(json, "pearson", pearson);
   json += '}';
   out.set(json);
 } catch (...) { out.error("STATS_SKEWNESS: unexpected error"); }
@@ -493,23 +510,25 @@ static constexpr auto make_skewness_json_func(const char *name) {
 struct ZTestState {
   size_t n = 0;
   double sum = 0.0;
-  double mu = 0.0;    // population mean (constant; last non-null wins)
-  double sigma = 0.0; // population std dev (constant; last non-null wins; 0 = never set → NULL)
+  double mu = 0.0;    // population mean (constant; last non-null finite wins)
+  double sigma = 0.0; // population std dev (last non-null finite wins; 0 = never set → NULL)
 };
 
 static void ztest_clear(ZTestState &s) { s = ZTestState{}; }
 
 static void ztest_accumulate(ZTestState &s, RealArg value, RealArg mu, RealArg sigma) {
-  if (!mu.is_null() && !std::isnan(mu.value()))    s.mu    = mu.value();
-  if (!sigma.is_null() && !std::isnan(sigma.value())) s.sigma = sigma.value();
-  if (value.is_null() || std::isnan(value.value())) return;
+  if (const auto m = finite_value(mu))     s.mu    = *m;
+  if (const auto sd = finite_value(sigma)) s.sigma = *sd;
+  const auto v = finite_value(value);
+  if (!v) return;
   s.n++;
-  s.sum += value.value();
+  s.sum += *v;
 }
 
-// Returns nullopt when sigma was never set (0.0), is non-positive, or NaN.
+// Returns nullopt when no values accumulated or sigma was never set (0.0) /
+// is non-positive. mu and sigma are always finite here — see ztest_accumulate.
 static std::optional<double> compute_ztest(const ZTestState &s) {
-  if (s.n == 0 || !(s.sigma > 0.0) || std::isnan(s.sigma) || std::isnan(s.mu)) return std::nullopt;
+  if (s.n == 0 || !(s.sigma > 0.0)) return std::nullopt;
   const double mean = s.sum / static_cast<double>(s.n);
   return (mean - s.mu) / (s.sigma / std::sqrt(static_cast<double>(s.n)));
 }
@@ -522,18 +541,12 @@ static void stats_ztest_json_result(const ZTestState &s, StringResult out) try {
 
   std::string json;
   json.reserve(128);
-
-  auto append = [&](const char *key, double val) {
-    json += '"'; json += key; json += "\":";
-    json += fmt_no_exp(val);
-  };
-
   json += '{';
-  append("z",          *z);
+  append_field(json, "z",          *z);
   json += ',';
-  append("p_one_tail", 0.5 * std::erfc(*z / std::sqrt(2.0)));
+  append_field(json, "p_one_tail", 0.5 * std::erfc(*z / std::sqrt(2.0)));
   json += ',';
-  append("p_two_tail", std::erfc(std::fabs(*z) / std::sqrt(2.0)));
+  append_field(json, "p_two_tail", std::erfc(std::fabs(*z) / std::sqrt(2.0)));
   json += '}';
 
   out.set(json);
@@ -562,40 +575,33 @@ static double gamma_prefix(double a, double x) {
 // Series expansion of the regularized lower incomplete gamma P(a, x) = γ(a,x)/Γ(a).
 // Converges for x < a+1.
 static double gammap_series(double a, double x) {
-  constexpr int    max_iter = 500;
-  constexpr double eps      = 1e-12;
-
   double ap  = a;
   double del = 1.0 / a;
   double sum = del;
-  for (int i = 0; i < max_iter; i++) {
+  for (int i = 0; i < max_series_iter; i++) {
     ap  += 1.0;
     del *= x / ap;
     sum += del;
-    if (std::fabs(del) < std::fabs(sum) * eps) break;
+    if (std::fabs(del) < std::fabs(sum) * converge_eps) break;
   }
   return sum * gamma_prefix(a, x);
 }
 
 // Continued fraction representation of the upper incomplete gamma Q(a, x) = Γ(a,x)/Γ(a).
-// Converges for x >= a+1. Uses Lentz's algorithm.
+// Converges for x >= a+1. Uses Lentz's algorithm (Numerical Recipes §6.2).
 static double gammacf(double a, double x) {
-  constexpr int    max_iter = 500;
-  constexpr double tiny     = 1e-30;
-  constexpr double eps      = 1e-12;
-
   double b = x + 1.0 - a;
-  double c = 1.0 / tiny;
+  double c = 1.0 / lentz_tiny;
   double d = 1.0 / b;
   double h = d;
-  for (int i = 1; i <= max_iter; i++) {
+  for (int i = 1; i <= max_series_iter; i++) {
     const double an = -static_cast<double>(i) * (static_cast<double>(i) - a);
     b += 2.0;
-    d = an * d + b; if (std::fabs(d) < tiny) d = tiny; d = 1.0 / d;
-    c = b + an / c; if (std::fabs(c) < tiny) c = tiny;
+    d = an * d + b; if (std::fabs(d) < lentz_tiny) d = lentz_tiny; d = 1.0 / d;
+    c = b + an / c; if (std::fabs(c) < lentz_tiny) c = lentz_tiny;
     const double del = d * c;
     h *= del;
-    if (std::fabs(del - 1.0) < eps) break;
+    if (std::fabs(del - 1.0) < converge_eps) break;
   }
   return gamma_prefix(a, x) * h;
 }
@@ -615,15 +621,14 @@ struct ChiSqGofState {
 
 static void chisq_gof_clear(ChiSqGofState &s) { s = ChiSqGofState{}; }
 
-// Shared cell accumulation: (O-E)²/E; skips rows where E is NULL, zero, or negative.
+// Shared cell accumulation: (O-E)²/E; skips rows where O or E is NULL/non-finite,
+// or E is zero or negative.
 static void chisq_accumulate_cell(double &chi_sq, size_t &k, RealArg observed, RealArg expected) {
-  if (observed.is_null() || expected.is_null()) return;
-  const double obs = observed.value();
-  const double e = expected.value();
-  if (std::isnan(obs) || std::isnan(e)) return;
-  if (!(e > 0.0)) return;
-  const double diff = obs - e;
-  chi_sq += (diff * diff) / e;
+  const auto obs = finite_value(observed);
+  const auto e   = finite_value(expected);
+  if (!obs || !e || !(*e > 0.0)) return;
+  const double diff = *obs - *e;
+  chi_sq += (diff * diff) / *e;
   k++;
 }
 
@@ -635,20 +640,15 @@ static void chisq_gof_accumulate(ChiSqGofState &s, RealArg observed, RealArg exp
 static void stats_chisq_gof_json_result(const ChiSqGofState &s, StringResult out) try {
   if (s.k == 0) { out.set_null(); return; }
   const double df = static_cast<double>(s.k - 1);
+  const std::optional<double> p = (s.k > 1)
+    ? std::optional<double>(gammaq(df / 2.0, s.chi_sq / 2.0)) : std::nullopt;
 
   std::string json;
   json.reserve(128);
-
-  auto append = [&](const char *key, double val) {
-    json += '"'; json += key; json += "\":";
-    json += fmt_no_exp(val);
-  };
-
   json += '{';
-  append("chi_sq", s.chi_sq); json += ',';
-  append("df", df); json += ',';
-  json += "\"p\":";
-  json += (s.k > 1) ? fmt_no_exp(gammaq(df / 2.0, s.chi_sq / 2.0)) : "null";
+  append_field(json, "chi_sq", s.chi_sq); json += ',';
+  append_field(json, "df",     df);       json += ',';
+  append_field(json, "p",      p);
   json += '}';
 
   out.set(json);
@@ -675,35 +675,29 @@ static void chisq_indep_clear(ChiSqIndepState &s) { s = ChiSqIndepState{}; }
 
 static void chisq_indep_accumulate(ChiSqIndepState &s, RealArg observed,
                                    RealArg expected, RealArg n_rows, RealArg n_cols) {
-  if (!n_rows.is_null() && !std::isnan(n_rows.value())) s.n_rows = n_rows.value();
-  if (!n_cols.is_null() && !std::isnan(n_cols.value())) s.n_cols = n_cols.value();
+  if (const auto r = finite_value(n_rows)) s.n_rows = *r;
+  if (const auto c = finite_value(n_cols)) s.n_cols = *c;
   chisq_accumulate_cell(s.chi_sq, s.k, observed, expected);
 }
 
-// chi_sq, df, p — df/p are null when n_rows/n_cols missing or df <= 0.
+// chi_sq, df, p — df/p are null when either dimension floors below 1 (missing
+// or fractional < 1, which would otherwise yield a negative df); p is also
+// null when df = 0 (1×N tables).
 static void stats_chisq_indep_json_result(const ChiSqIndepState &s, StringResult out) try {
   if (s.k == 0) { out.set_null(); return; }
 
-  const bool has_dims = (s.n_rows > 0.0) && (s.n_cols > 0.0);
-  const double df = has_dims
-    ? (std::floor(s.n_rows) - 1.0) * (std::floor(s.n_cols) - 1.0)
-    : 0.0;
+  std::optional<double> df;
+  if (std::floor(s.n_rows) >= 1.0 && std::floor(s.n_cols) >= 1.0)
+    df = (std::floor(s.n_rows) - 1.0) * (std::floor(s.n_cols) - 1.0);
+  const std::optional<double> p = (df && *df > 0.0)
+    ? std::optional<double>(gammaq(*df / 2.0, s.chi_sq / 2.0)) : std::nullopt;
 
   std::string json;
   json.reserve(128);
-
-  auto append = [&](const char *key, double val) {
-    json += '"'; json += key; json += "\":";
-    json += fmt_no_exp(val);
-  };
-
   json += '{';
-  append("chi_sq", s.chi_sq); json += ',';
-  json += "\"df\":";
-  json += has_dims ? fmt_no_exp(df) : "null";
-  json += ',';
-  json += "\"p\":";
-  json += (has_dims && df > 0.0) ? fmt_no_exp(gammaq(df / 2.0, s.chi_sq / 2.0)) : "null";
+  append_field(json, "chi_sq", s.chi_sq); json += ',';
+  append_field(json, "df",     df);       json += ',';
+  append_field(json, "p",      p);
   json += '}';
 
   out.set(json);
@@ -737,9 +731,10 @@ struct KurtState {
 static void kurt_clear(KurtState &s) { s = KurtState{}; }
 
 static void kurt_accumulate(KurtState &s, RealArg v) {
-  if (v.is_null() || std::isnan(v.value())) return;
-  if (s.n == 0) s.ref = v.value();
-  const double d = v.value() - s.ref;
+  const auto x = finite_value(v);
+  if (!x) return;
+  if (s.n == 0) s.ref = *x;
+  const double d = *x - s.ref;
   const double d2 = d * d;
   s.n++;
   s.sum1 += d;
@@ -771,25 +766,21 @@ static void stats_kurtosis_json_result(const KurtState &s, StringResult out) try
   const auto km = compute_kurt_moments(s);
   const double n = static_cast<double>(s.n);
 
-  std::string json;
-  json.reserve(128);
-  json += '{';
-  json += "\"kurtosis\":";
-
-  if (!km) {
-    json += "null,\"excess\":null";
-  } else {
-    const double beta2 = km->ssq4 * n / (km->ssq2 * km->ssq2);
-    json += fmt_no_exp(beta2);
-    json += ",\"excess\":";
-    if (s.n < 4) {
-      json += "null";
-    } else {
+  std::optional<double> kurtosis;
+  std::optional<double> excess;
+  if (km) {
+    kurtosis = km->ssq4 * n / (km->ssq2 * km->ssq2);
+    if (s.n >= 4) {
       const double a = (n - 1.0) / ((n - 2.0) * (n - 3.0));
-      json += fmt_no_exp(a * (n * (n + 1.0) * km->ssq4 / (km->ssq2 * km->ssq2) - 3.0 * (n - 1.0)));
+      excess = a * (n * (n + 1.0) * km->ssq4 / (km->ssq2 * km->ssq2) - 3.0 * (n - 1.0));
     }
   }
 
+  std::string json;
+  json.reserve(128);
+  json += '{';
+  append_field(json, "kurtosis", kurtosis); json += ',';
+  append_field(json, "excess",   excess);
   json += '}';
   out.set(json);
 } catch (...) { out.error("STATS_KURTOSIS: unexpected error"); }
@@ -813,33 +804,34 @@ struct CovState {
   size_t n = 0;
   double mean_x = 0.0;
   double mean_y = 0.0;
-  double C = 0.0;  // running co-moment: converges to Σ(xi−x̄)(yi−ȳ)
+  double co_moment = 0.0;  // converges to Σ(xi−x̄)(yi−ȳ)
 };
 
 static void cov_clear(CovState &s) { s = CovState{}; }
 
 static void cov_accumulate(CovState &s, RealArg x, RealArg y) {
-  if (x.is_null() || y.is_null()) return;
-  const double xv = x.value();
-  const double yv = y.value();
-  if (std::isnan(xv) || std::isnan(yv)) return;
+  const auto xv = finite_value(x);
+  const auto yv = finite_value(y);
+  if (!xv || !yv) return;
   s.n++;
-  const double dx = xv - s.mean_x;
+  const double dx = *xv - s.mean_x;
   s.mean_x += dx / static_cast<double>(s.n);
-  s.mean_y += (yv - s.mean_y) / static_cast<double>(s.n);
-  s.C += dx * (yv - s.mean_y);  // uses updated mean_y — Welford's co-moment form
+  s.mean_y += (*yv - s.mean_y) / static_cast<double>(s.n);
+  s.co_moment += dx * (*yv - s.mean_y);  // uses updated mean_y — Welford's co-moment form
 }
 
 // pop = C/n (0.0 for n=1); samp = C/(n-1) (null for n<2); whole result NULL for n=0.
 static void stats_cov_json_result(const CovState &s, StringResult out) try {
   if (s.n == 0) { out.set_null(); return; }
   const double dn = static_cast<double>(s.n);
+  const std::optional<double> samp = (s.n >= 2)
+    ? std::optional<double>(s.co_moment / (dn - 1.0)) : std::nullopt;
+
   std::string json;
   json.reserve(64);
-  json += "{\"pop\":";
-  json += fmt_no_exp(s.C / dn);
-  json += ",\"samp\":";
-  json += (s.n >= 2) ? fmt_no_exp(s.C / (dn - 1.0)) : "null";
+  json += '{';
+  append_field(json, "pop",  s.co_moment / dn); json += ',';
+  append_field(json, "samp", samp);
   json += '}';
   out.set(json);
 } catch (...) { out.error("STATS_COVARIANCE: unexpected error"); }
@@ -860,66 +852,72 @@ static constexpr auto make_cov_json_func(const char *name) {
 
 // trim_pct = NaN sentinel means "never set" → trimmed/winsorized fields are null.
 struct MeanState {
-  mutable std::vector<double> values;
+  std::vector<double> values;
   double trim_pct = std::numeric_limits<double>::quiet_NaN();
   size_t n_pos = 0;
   double sum_log = 0.0;   // Σ ln(xi) for positive values
   double sum_recip = 0.0; // Σ(1/xi) for positive values
+  bool oom = false;
 };
 
 static void mean_clear(MeanState &s) { s = MeanState{}; }
 
-static void mean_accumulate(MeanState &s, RealArg v, RealArg trim_pct) {
-  if (!trim_pct.is_null() && !std::isnan(trim_pct.value())) s.trim_pct = trim_pct.value();
-  if (v.is_null() || std::isnan(v.value())) return;
-  const double x = v.value();
-  s.values.push_back(x);
-  if (x > 0.0) {
+static void mean_accumulate(MeanState &s, RealArg v, RealArg trim_pct) try {
+  if (const auto p = finite_value(trim_pct)) s.trim_pct = *p;
+  const auto x = finite_value(v);
+  if (!x) return;
+  s.values.push_back(*x);
+  if (*x > 0.0) {
     s.n_pos++;
-    s.sum_log += std::log(x);
-    s.sum_recip += 1.0 / x;
+    s.sum_log += std::log(*x);
+    s.sum_recip += 1.0 / *x;
   }
-}
+} catch (...) { s.oom = true; }
 
 // trimmed/winsorized are null when trim_pct was never set, invalid, or all values removed.
 // geometric/harmonic are null when no positive values exist.
 // Whole result is NULL when no values were accumulated.
 static void stats_mean_json_result(const MeanState &s, StringResult out) try {
+  if (s.oom) { out.error("STATS_MEAN: out of memory"); return; }
   if (s.values.empty()) { out.set_null(); return; }
 
   const size_t n = s.values.size();
   const double p = s.trim_pct;
-  std::string trimmed_str = "null";
-  std::string winsorized_str = "null";
+  std::optional<double> trimmed;
+  std::optional<double> winsorized;
 
   if (!std::isnan(p) && p >= 0.0 && p < 0.5) {
-    std::sort(s.values.begin(), s.values.end());
+    std::vector<double> sorted(s.values);
+    std::sort(sorted.begin(), sorted.end());
     const size_t k = static_cast<size_t>(std::floor(p * static_cast<double>(n)));
     if (2 * k < n) {
       double tsum = 0.0;
-      for (size_t i = k; i < n - k; ++i) tsum += s.values[i];
-      trimmed_str = fmt_no_exp(tsum / static_cast<double>(n - 2 * k));
+      for (size_t i = k; i < n - k; ++i) tsum += sorted[i];
+      trimmed = tsum / static_cast<double>(n - 2 * k);
 
-      const double lo = s.values[k];
-      const double hi = s.values[n - 1 - k];
+      const double lo = sorted[k];
+      const double hi = sorted[n - 1 - k];
       double wsum = static_cast<double>(k) * lo;
-      for (size_t i = k; i < n - k; ++i) wsum += s.values[i];
+      for (size_t i = k; i < n - k; ++i) wsum += sorted[i];
       wsum += static_cast<double>(k) * hi;
-      winsorized_str = fmt_no_exp(wsum / static_cast<double>(n));
+      winsorized = wsum / static_cast<double>(n);
     }
   }
 
-  const std::string geo_str  = (s.n_pos > 0)
-    ? fmt_no_exp(std::exp(s.sum_log / static_cast<double>(s.n_pos))) : "null";
-  const std::string harm_str = (s.n_pos > 0)
-    ? fmt_no_exp(static_cast<double>(s.n_pos) / s.sum_recip) : "null";
+  const std::optional<double> geometric = (s.n_pos > 0)
+    ? std::optional<double>(std::exp(s.sum_log / static_cast<double>(s.n_pos)))
+    : std::nullopt;
+  const std::optional<double> harmonic = (s.n_pos > 0)
+    ? std::optional<double>(static_cast<double>(s.n_pos) / s.sum_recip)
+    : std::nullopt;
 
   std::string json;
   json.reserve(160);
-  json += "{\"trimmed\":";    json += trimmed_str;
-  json += ",\"winsorized\":"; json += winsorized_str;
-  json += ",\"geometric\":";  json += geo_str;
-  json += ",\"harmonic\":";   json += harm_str;
+  json += '{';
+  append_field(json, "trimmed",    trimmed);    json += ',';
+  append_field(json, "winsorized", winsorized); json += ',';
+  append_field(json, "geometric",  geometric);  json += ',';
+  append_field(json, "harmonic",   harmonic);
   json += '}';
   out.set(json);
 } catch (...) { out.error("STATS_MEAN: unexpected error"); }
@@ -947,22 +945,25 @@ struct AnovaGroupStats {
 
 struct AnovaState {
   std::unordered_map<double, AnovaGroupStats> groups;
+  bool oom = false;
 };
 
-static void anova_clear(AnovaState &s) { s.groups.clear(); }
-
-static void anova_accumulate(AnovaState &s, RealArg value, RealArg group) {
-  if (value.is_null() || group.is_null()) return;
-  const double v = value.value();
-  const double g = group.value();
-  if (std::isnan(v) || std::isnan(g)) return;
-  auto &gs = s.groups[g];
-  gs.n++;
-  gs.sum += v;
-  const double delta = v - gs.mean;
-  gs.mean += delta / static_cast<double>(gs.n);
-  gs.ss += delta * (v - gs.mean);
+static void anova_clear(AnovaState &s) {
+  s.groups.clear();
+  s.oom = false;
 }
+
+static void anova_accumulate(AnovaState &s, RealArg value, RealArg group) try {
+  const auto v = finite_value(value);
+  const auto g = finite_value(group);
+  if (!v || !g) return;
+  auto &gs = s.groups[*g];
+  gs.n++;
+  gs.sum += *v;
+  const double delta = *v - gs.mean;
+  gs.mean += delta / static_cast<double>(gs.n);
+  gs.ss += delta * (*v - gs.mean);
+} catch (...) { s.oom = true; }
 
 struct AnovaResult {
   double ssb;
@@ -976,8 +977,8 @@ struct AnovaResult {
 };
 
 // Returns nullopt when k < 2, any group has n < 2, or MSW is zero.
-// Spec requires k ≥ 3 for valid one-way ANOVA; k = 2 is mathematically
-// equivalent to a t-test — use STATS_TTEST_T for two-group comparisons.
+// k = 2 is permitted; it is mathematically equivalent to a pooled two-sample
+// t-test (F = t²) — see STATS_TTEST for two-group comparisons.
 static std::optional<AnovaResult> compute_anova(const AnovaState &s) {
   const size_t k = s.groups.size();
   if (k < 2) return std::nullopt;
@@ -1014,6 +1015,7 @@ static std::optional<AnovaResult> compute_anova(const AnovaState &s) {
 
 // P(F_{dfB,dfW} > F) = I_{dfW/(dfW + dfB·F)}(dfW/2, dfB/2)
 static void stats_anova_json_result(const AnovaState &s, StringResult out) try {
+  if (s.oom) { out.error("STATS_ANOVA: out of memory"); return; }
   const auto r = compute_anova(s);
   if (!r) { out.set_null(); return; }
 
@@ -1021,22 +1023,16 @@ static void stats_anova_json_result(const AnovaState &s, StringResult out) try {
 
   std::string json;
   json.reserve(256);
-
-  auto append = [&](const char *key, double val) {
-    json += '"'; json += key; json += "\":";
-    json += fmt_no_exp(val);
-  };
-
   json += '{';
-  append("f",    r->f);    json += ',';
-  append("p",    p);       json += ',';
-  append("ssb",  r->ssb);  json += ',';
-  append("ssw",  r->ssw);  json += ',';
-  append("sst",  r->sst);  json += ',';
-  append("msb",  r->msb);  json += ',';
-  append("msw",  r->msw);  json += ',';
-  append("df_b", r->df_b); json += ',';
-  append("df_w", r->df_w);
+  append_field(json, "f",    r->f);    json += ',';
+  append_field(json, "p",    p);       json += ',';
+  append_field(json, "ssb",  r->ssb);  json += ',';
+  append_field(json, "ssw",  r->ssw);  json += ',';
+  append_field(json, "sst",  r->sst);  json += ',';
+  append_field(json, "msb",  r->msb);  json += ',';
+  append_field(json, "msw",  r->msw);  json += ',';
+  append_field(json, "df_b", r->df_b); json += ',';
+  append_field(json, "df_w", r->df_w);
   json += '}';
 
   out.set(json);
