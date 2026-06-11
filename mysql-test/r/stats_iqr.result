@@ -28,6 +28,22 @@ SELECT CAST(STATS_IQR(v) AS CHAR) AS iqr FROM two_rows;
 iqr
 {"q1":5,"median":10,"q3":15,"iqr":10,"lower_fence":-10,"upper_fence":30}
 DROP TABLE two_rows;
+# --- Edge case: three rows (odd-n hinge boundary) ---
+# sorted: 1,2,3 — Q1=1, median=2, Q3=3, IQR=2
+CREATE TABLE three_rows (v DOUBLE);
+INSERT INTO three_rows VALUES (2),(1),(3);
+SELECT CAST(STATS_IQR(v) AS CHAR) AS iqr FROM three_rows;
+iqr
+{"q1":1,"median":2,"q3":3,"iqr":2,"lower_fence":-2,"upper_fence":6}
+DROP TABLE three_rows;
+# --- Edge case: four rows (even-n hinge boundary) ---
+# sorted: 1,2,3,4 — Q1=1.5, median=2.5, Q3=3.5, IQR=2
+CREATE TABLE four_rows (v DOUBLE);
+INSERT INTO four_rows VALUES (3),(1),(4),(2);
+SELECT CAST(STATS_IQR(v) AS CHAR) AS iqr FROM four_rows;
+iqr
+{"q1":1.5,"median":2.5,"q3":3.5,"iqr":2,"lower_fence":-1.5,"upper_fence":6.5}
+DROP TABLE four_rows;
 # --- Edge case: all-NULL group returns NULL ---
 CREATE TABLE nullable_vals (v DOUBLE);
 INSERT INTO nullable_vals VALUES (NULL),(NULL),(NULL);

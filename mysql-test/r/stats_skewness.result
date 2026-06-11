@@ -32,6 +32,11 @@ SELECT CAST(STATS_SKEWNESS(val) AS CHAR) AS skewness FROM skew_data;
 skewness
 NULL
 DELETE FROM skew_data;
+INSERT INTO skew_data VALUES (1),(3);
+SELECT CAST(STATS_SKEWNESS(val) AS CHAR) AS skewness FROM skew_data;
+skewness
+{"moment":0,"pearson":0}
+DELETE FROM skew_data;
 INSERT INTO skew_data VALUES (5),(5),(5),(5),(5);
 SELECT CAST(STATS_SKEWNESS(val) AS CHAR) AS skewness FROM skew_data;
 skewness

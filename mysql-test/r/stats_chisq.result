@@ -49,6 +49,16 @@ SELECT CAST(STATS_CHISQ_INDEP(observed, expected, 0.0, 0.0) AS CHAR) AS indep FR
 indep
 {"chi_sq":33.3333333333333,"df":null,"p":null}
 DELETE FROM chisq_indep;
+INSERT INTO chisq_indep VALUES (60,40),(40,60),(20,40),(80,60);
+SELECT CAST(STATS_CHISQ_INDEP(observed, expected, 2.7, 3.9) AS CHAR) AS indep FROM chisq_indep;
+indep
+{"chi_sq":33.3333333333333,"df":2,"p":0.000000057777485}
+DELETE FROM chisq_indep;
+INSERT INTO chisq_indep VALUES (60,40),(40,60),(20,40),(80,60);
+SELECT CAST(STATS_CHISQ_INDEP(observed, expected, 0.5, 3.0) AS CHAR) AS indep FROM chisq_indep;
+indep
+{"chi_sq":33.3333333333333,"df":null,"p":null}
+DELETE FROM chisq_indep;
 DROP TABLE chisq_indep;
 CREATE TABLE vsql_test.chisq_grouped (grp INT, observed DOUBLE, expected DOUBLE);
 INSERT INTO chisq_grouped VALUES

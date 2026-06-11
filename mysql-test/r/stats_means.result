@@ -32,6 +32,12 @@ SELECT CAST(STATS_MEAN(val, trim_pct) AS CHAR) AS means FROM means_data;
 means
 {"trimmed":null,"winsorized":null,"geometric":14.142135623731,"harmonic":13.3333333333333}
 DELETE FROM means_data;
+# --- Negative trim_pct: invalid, trimmed/winsorized are null ---
+INSERT INTO means_data VALUES (10,-0.1),(20,-0.1),(30,-0.1);
+SELECT CAST(STATS_MEAN(val, trim_pct) AS CHAR) AS means FROM means_data;
+means
+{"trimmed":null,"winsorized":null,"geometric":18.1712059283214,"harmonic":16.3636363636364}
+DELETE FROM means_data;
 # --- All-NULL values: whole result is NULL ---
 INSERT INTO means_data VALUES (NULL,0.2),(NULL,0.2);
 SELECT CAST(STATS_MEAN(val, trim_pct) AS CHAR) AS means FROM means_data;

@@ -52,6 +52,49 @@ SELECT CAST(STATS_TTEST_GROUPS(value, grp) AS CHAR) AS ttest_groups_small FROM t
 ttest_groups_small
 NULL
 DROP TABLE ttest_small_group;
+# --- Group labels other than 1 and 2 are ignored ---
+# grp 0, 3, and NULL rows dropped; result matches the basic dataset
+CREATE TABLE ttest_labels (value DOUBLE, grp INT);
+INSERT INTO ttest_labels VALUES
+(100,1),(110,1),(120,1),(130,1),(140,1),
+(90,2),(100,2),(110,2),(120,2),(130,2),
+(999,0),(999,3),(999,NULL);
+SELECT CAST(STATS_TTEST(value, grp, 0.05) AS CHAR) AS ttest_labels FROM ttest_labels;
+ttest_labels
+{"pooled_var":250,"df":8,"t":1,"p_one_tail":0.173296753543667,"t_crit_one_tail":1.85954803753071,"p_two_tail":0.346593507087334,"t_crit_two_tail":2.30600413520416}
+DROP TABLE ttest_labels;
+# --- NULL alpha: defaults to 0.05 (same output as the basic dataset) ---
+CREATE TABLE ttest_null_alpha (value DOUBLE, grp INT, alpha DOUBLE);
+INSERT INTO ttest_null_alpha VALUES
+(100,1,NULL),(110,1,NULL),(120,1,NULL),(130,1,NULL),(140,1,NULL),
+(90,2,NULL),(100,2,NULL),(110,2,NULL),(120,2,NULL),(130,2,NULL);
+SELECT CAST(STATS_TTEST(value, grp, alpha) AS CHAR) AS ttest_default_alpha FROM ttest_null_alpha;
+ttest_default_alpha
+{"pooled_var":250,"df":8,"t":1,"p_one_tail":0.173296753543667,"t_crit_one_tail":1.85954803753071,"p_two_tail":0.346593507087334,"t_crit_two_tail":2.30600413520416}
+DROP TABLE ttest_null_alpha;
+# --- alpha taken from the single non-NULL row (NULL rows do not reset it) ---
+CREATE TABLE ttest_one_alpha (value DOUBLE, grp INT, alpha DOUBLE);
+INSERT INTO ttest_one_alpha VALUES
+(100,1,NULL),(110,1,0.01),(120,1,NULL),(130,1,NULL),(140,1,NULL),
+(90,2,NULL),(100,2,NULL),(110,2,NULL),(120,2,NULL),(130,2,NULL);
+SELECT CAST(STATS_TTEST(value, grp, alpha) AS CHAR) AS ttest_single_alpha FROM ttest_one_alpha;
+ttest_single_alpha
+{"pooled_var":250,"df":8,"t":1,"p_one_tail":0.173296753543667,"t_crit_one_tail":2.8964594477096,"p_two_tail":0.346593507087334,"t_crit_two_tail":3.35538733133335}
+DROP TABLE ttest_one_alpha;
+# --- Zero pooled variance, equal means: t=0, p_two_tail=1 ---
+CREATE TABLE ttest_zero_var_eq (value DOUBLE, grp INT);
+INSERT INTO ttest_zero_var_eq VALUES (5,1),(5,1),(5,2),(5,2);
+SELECT CAST(STATS_TTEST(value, grp, 0.05) AS CHAR) AS ttest_zero_eq FROM ttest_zero_var_eq;
+ttest_zero_eq
+{"pooled_var":0,"df":2,"t":0,"p_one_tail":0.5,"t_crit_one_tail":2.91998558035373,"p_two_tail":1,"t_crit_two_tail":4.30265272974946}
+DROP TABLE ttest_zero_var_eq;
+# --- Zero pooled variance, different means: returns NULL (t undefined) ---
+CREATE TABLE ttest_zero_var_ne (value DOUBLE, grp INT);
+INSERT INTO ttest_zero_var_ne VALUES (5,1),(5,1),(9,2),(9,2);
+SELECT CAST(STATS_TTEST(value, grp, 0.05) AS CHAR) AS ttest_zero_ne FROM ttest_zero_var_ne;
+ttest_zero_ne
+NULL
+DROP TABLE ttest_zero_var_ne;
 # --- Edge case: all-NULL values returns NULL ---
 CREATE TABLE ttest_nulls (value DOUBLE, grp INT);
 INSERT INTO ttest_nulls VALUES (NULL,1),(NULL,2);

@@ -17,6 +17,11 @@ SELECT CAST(STATS_KURTOSIS(val) AS CHAR) AS kurtosis FROM kurt_data;
 kurtosis
 {"kurtosis":1.5,"excess":null}
 DELETE FROM kurt_data;
+INSERT INTO kurt_data VALUES (1),(2),(3),(4);
+SELECT CAST(STATS_KURTOSIS(val) AS CHAR) AS kurtosis FROM kurt_data;
+kurtosis
+{"kurtosis":1.64,"excess":-1.2}
+DELETE FROM kurt_data;
 INSERT INTO kurt_data VALUES (NULL),(NULL),(NULL);
 SELECT CAST(STATS_KURTOSIS(val) AS CHAR) AS kurtosis FROM kurt_data;
 kurtosis
