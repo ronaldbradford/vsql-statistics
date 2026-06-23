@@ -258,6 +258,8 @@ Use `CAST(STATS_ZTEST(...) AS CHAR)` to read results in the mysql CLI.
 
 Interpretation: normal distribution has β₂ = 3 and g₂ = 0. Positive excess = heavy-tailed (leptokurtic); negative = light-tailed (platykurtic).
 
+See `examples/kurtosis_exam_scores.sql` for a controlled comparison of leptokurtic, mesokurtic, and platykurtic classroom sections, and `examples/kurtosis_longjump.sql` for how kurtosis changes across Olympic long-jump performance tiers.
+
 ### Covariance Family
 
 <img src="images/covariance.svg" alt="Scatter plots showing positive, negative, and zero covariance" width="400">
