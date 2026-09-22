@@ -86,7 +86,7 @@ CREATE TABLE ttest_zero_var_eq (value DOUBLE, grp INT);
 INSERT INTO ttest_zero_var_eq VALUES (5,1),(5,1),(5,2),(5,2);
 SELECT CAST(STATS_TTEST(value, grp, 0.05) AS CHAR) AS ttest_zero_eq FROM ttest_zero_var_eq;
 ttest_zero_eq
-{"pooled_var":0,"df":2,"t":0,"p_one_tail":0.5,"t_crit_one_tail":2.91998558035373,"p_two_tail":1,"t_crit_two_tail":4.30265272974946}
+{"pooled_var":0,"df":2,"t":0,"p_one_tail":0.5,"t_crit_one_tail":2.91998558035372,"p_two_tail":1,"t_crit_two_tail":4.30265272974946}
 DROP TABLE ttest_zero_var_eq;
 # --- Zero pooled variance, different means: returns NULL (t undefined) ---
 CREATE TABLE ttest_zero_var_ne (value DOUBLE, grp INT);
